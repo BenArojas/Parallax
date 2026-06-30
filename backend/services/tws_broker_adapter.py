@@ -32,6 +32,9 @@ from models.tws_execution_assistant import (
     TwsAdvancedReject,
     TwsModifyOrderRequest,
     TwsOrderActionResult,
+    TwsOrderPackageLegSubmission,
+    TwsOrderPackagePreview,
+    TwsOrderPackageSubmission,
     TwsStatusResponse,
 )
 
@@ -513,6 +516,98 @@ class TwsBrokerAdapter:
         advanced_override: list[str] | None = None,
     ) -> PaperOrderSubmission:
         return await self.place_order(plan, mode="paper", advanced_override=advanced_override)
+
+    async def place_order_package(
+        self,
+        preview: TwsOrderPackagePreview,
+        *,
+        mode: str,
+        live_policy: object | None = None,
+        advanced_override: list[str] | None = None,
+    ) -> TwsOrderPackageSubmission:
+        """Submit a previously previewed order package (e.g. a scale-out ladder).
+
+        Re-runs the same defense-in-depth guard as place_order before building any
+        order. Generates every leg's orderId up front via getReqId() so child legs
+        can carry a valid parentId pointing at the package's first (root) leg —
+        mirrors ib_async's own IB.bracketOrder() pattern. Legs are placed in preview
+        order (root first) with transmit=False on every leg except the last, so TWS
+        does not route a partial package.
+        """
+        self._ensure_order_mutation_allowed(mode=mode, live_policy=live_policy)
+
+        contract = Contract(
+            conId=preview.conid, symbol=preview.symbol, secType="STK", exchange="SMART", currency="USD"
+        )
+        order_ids = [self._ib.client.getReqId() for _ in preview.legs]
+        root_order_id = order_ids[0]
+
+        captured_rejects: list[TwsAdvancedReject] = []
+
+        def _on_error(req_id: int, code: int, msg: str, contract: object) -> None:
+            if code in _ADVANCED_REJECT_CODES and msg:
+                captured_rejects.append(_advanced_reject_from_raw(req_id, msg))
+
+        _ACCEPTED: frozenset[str] = frozenset({"PreSubmitted", "Submitted", "Filled", "PartiallyFilled"})
+
+        trades = []
+        self._ib.errorEvent += _on_error
+        try:
+            for i, leg in enumerate(preview.legs):
+                order = Order(
+                    orderId=order_ids[i],
+                    action=leg.side,
+                    orderType=leg.order_type,
+                    totalQuantity=leg.quantity,
+                    tif=leg.tif,
+                    transmit=leg.transmit,
+                    orderRef=f"ORBIT:TWS:{preview.package_id}:{leg.role}",
+                )
+                if leg.limit_price is not None:
+                    order.lmtPrice = leg.limit_price
+                if leg.stop_price is not None:
+                    order.auxPrice = leg.stop_price
+                if leg.trail is not None:
+                    if leg.trail.mode == "percent":
+                        order.trailingPercent = leg.trail.value
+                    else:
+                        order.auxPrice = leg.trail.value
+                if leg.limit_offset is not None:
+                    order.lmtPriceOffset = leg.limit_offset
+                if leg.good_till_date is not None:
+                    order.goodTillDate = leg.good_till_date
+                if leg.parent_ref is not None:
+                    order.parentId = root_order_id
+                if leg.oca_group is not None:
+                    order.ocaGroup = leg.oca_group
+                    order.ocaType = 1
+                if advanced_override:
+                    order.advancedErrorOverride = ",".join(advanced_override)
+
+                trade = self._ib.placeOrder(contract, order)
+                trades.append((leg, trade))
+
+            # Wait briefly for TWS to fire any immediate advanced reject errors.
+            await asyncio.sleep(0.3)
+            if captured_rejects and any(t.orderStatus.status not in _ACCEPTED for _, t in trades):
+                raise TwsAdvancedRejectError(captured_rejects[0])
+        finally:
+            self._ib.errorEvent -= _on_error
+
+        legs_out = [
+            TwsOrderPackageLegSubmission(
+                role=leg.role,
+                order_id=trade.order.orderId,
+                status=trade.orderStatus.status or "sent_to_tws",
+            )
+            for leg, trade in trades
+        ]
+        return TwsOrderPackageSubmission(
+            package_id=preview.package_id,
+            status=legs_out[0].status,
+            order_ids=[leg.order_id for leg in legs_out],
+            legs=legs_out,
+        )
 
     def _ensure_order_mutation_allowed(self, *, mode: str, live_policy: object | None = None) -> None:
         """Shared guard for cancel and modify — fail closed before any broker call."""

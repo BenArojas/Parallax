@@ -22,6 +22,7 @@ from models.tws_execution_assistant import (
     TwsOrderActionResult,
     TwsOrderPackagePreview,
     TwsOrderPackageRequest,
+    TwsOrderPackageSubmission,
     TwsOverrideRequest,
     TwsStatusResponse,
 )
@@ -544,3 +545,64 @@ async def preview_order_package_endpoint(req: TwsOrderPackageRequest) -> TwsOrde
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "invalid_order_package", "errors": exc.errors},
         )
+
+
+def _package_unknown_outcome(package_id: str, exc: Exception) -> HTTPException:
+    log.error("Order package placement failed for package %s: %s", package_id, exc)
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "error": "unknown_outcome",
+            "message": (
+                "Order package placement failed unexpectedly. Check TWS Open Orders "
+                "before retrying — some legs may have reached TWS."
+            ),
+        },
+    )
+
+
+@router.post("/order-packages/place-paper", response_model=TwsOrderPackageSubmission)
+async def place_paper_order_package(
+    preview: TwsOrderPackagePreview,
+    adapter: TwsBrokerAdapter = Depends(get_tws_adapter),
+) -> TwsOrderPackageSubmission:
+    try:
+        return await adapter.place_order_package(preview, mode="paper")
+    except TwsPlaceOrderGuardError as exc:
+        raise _guard_http_error(exc)
+    except TwsAdvancedRejectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "advanced_reject", "reject": exc.reject.model_dump()},
+        )
+    except (RuntimeError, OSError, ConnectionError, TimeoutError) as exc:
+        raise _package_unknown_outcome(preview.package_id, exc)
+
+
+@router.post("/order-packages/place-live", response_model=TwsOrderPackageSubmission)
+async def place_live_order_package(
+    preview: TwsOrderPackagePreview,
+    adapter: TwsBrokerAdapter = Depends(get_tws_adapter),
+    policy: TwsLivePolicyService = Depends(get_tws_live_policy),
+) -> TwsOrderPackageSubmission:
+    try:
+        policy.assert_live_allowed(
+            account_id=adapter.connected_account_id(),
+            host=adapter.connected_host(),
+            port=adapter.connected_port(),
+            is_connected=adapter.is_connected(),
+            is_paper_port=adapter.is_paper_port(),
+        )
+    except TwsPlaceOrderGuardError as exc:
+        raise _guard_http_error(exc)
+    try:
+        return await adapter.place_order_package(preview, mode="live", live_policy=policy)
+    except TwsPlaceOrderGuardError as exc:
+        raise _guard_http_error(exc)
+    except TwsAdvancedRejectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "advanced_reject", "reject": exc.reject.model_dump()},
+        )
+    except (RuntimeError, OSError, ConnectionError, TimeoutError) as exc:
+        raise _package_unknown_outcome(preview.package_id, exc)

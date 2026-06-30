@@ -249,3 +249,16 @@ class TwsOrderPackagePreview(BaseModel):
     symbol: str
     warnings: list[str] = []
     legs: list[TwsOrderLegPreview]
+
+
+class TwsOrderPackageLegSubmission(BaseModel):
+    role: str
+    order_id: int
+    status: str
+
+
+class TwsOrderPackageSubmission(BaseModel):
+    package_id: str
+    status: str
+    order_ids: list[int]
+    legs: list[TwsOrderPackageLegSubmission]
