@@ -8,10 +8,11 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
 import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
+import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
 import { TwsCandleChart } from "./TwsCandleChart";
 
 const STATUS_KEY = ["tws-status"];
-const RECON_KEY = ["tws-reconciliation"];
+export const RECON_KEY = ["tws-reconciliation"];
 const LIVE_STATUS_KEY = ["tws-live-status"];
 
 const PLAN_DEFAULTS: ExecutionPlanDraftRequest = {
@@ -1458,6 +1459,10 @@ export function TwsExecutionAssistantModule() {
               <EmptyTableState label="No open orders" />
             )}
           </Panel>
+        </div>
+
+        <div className="mt-1.5">
+          <ScaleOutLadderPanel canDraft={canDraft} isLiveSession={isLiveSession} />
         </div>
       </main>
     </div>

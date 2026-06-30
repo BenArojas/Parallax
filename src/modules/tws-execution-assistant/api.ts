@@ -236,6 +236,87 @@ export interface TwsOverrideRequest {
   override_codes: string[];
 }
 
+// ── Advanced order packages (Mission 2) ──────────────────────────────────────
+// Only "scale_out_ladder" is implemented so far; the other kinds are reserved
+// by the backend contract for later missions and have no cockpit UI yet.
+export type TwsAdvancedOrderKind =
+  | "scale_out_ladder"
+  | "bracket"
+  | "trailing_stop"
+  | "gtd"
+  | "moc"
+  | "loc"
+  | "price_condition";
+
+export interface TwsTrailSpec {
+  mode: "amount" | "percent";
+  value: number;
+}
+
+export interface TwsScaleOutLotDraft {
+  quantity: number;
+  target_price: number;
+  stop_price: number | null;
+  trail: TwsTrailSpec | null;
+  close_fallback: "MOC";
+}
+
+export interface TwsOrderPackageRequest {
+  kind: TwsAdvancedOrderKind;
+  conid: number;
+  symbol: string;
+  side: ExecutionPlanSide;
+  quantity: number;
+  order_type: string;
+  limit_price: number | null;
+  limit_offset: number | null;
+  stop_price: number | null;
+  trail: TwsTrailSpec | null;
+  good_till_date: string | null;
+  target_price: number | null;
+  lots: TwsScaleOutLotDraft[];
+  condition_price: number | null;
+  condition_is_above: boolean | null;
+}
+
+export interface TwsOrderLegPreview {
+  role: string;
+  side: ExecutionPlanSide;
+  quantity: number;
+  order_type: string;
+  limit_price: number | null;
+  limit_offset: number | null;
+  stop_price: number | null;
+  trail: TwsTrailSpec | null;
+  tif: string;
+  good_till_date: string | null;
+  parent_ref: string | null;
+  oca_group: string | null;
+  transmit: boolean;
+}
+
+export interface TwsOrderPackagePreview {
+  package_id: string;
+  kind: TwsAdvancedOrderKind;
+  conid: number;
+  symbol: string;
+  warnings: string[];
+  legs: TwsOrderLegPreview[];
+}
+
+export interface TwsOrderPackageLegSubmission {
+  role: string;
+  order_id: number;
+  status: string;
+}
+
+export interface TwsOrderPackageSubmission {
+  package_id: string;
+  status: string;
+  order_ids: number[];
+  legs: TwsOrderPackageLegSubmission[];
+}
+
 export const twsApi = {
   getMode: () =>
     sidecarRequest<BrokerSessionModeResponse>("GET", "/orbit/session/mode"),
@@ -286,4 +367,10 @@ export const twsApi = {
     sidecarRequest<PaperOrderPreview>("POST", `/execution-assistant/plans/${plan_id}/preview-live`),
   placeLiveOrder: (plan_id: string) =>
     sidecarRequest<PaperOrderSubmission>("POST", `/execution-assistant/plans/${plan_id}/place-live`),
+  previewOrderPackage: (req: TwsOrderPackageRequest) =>
+    sidecarRequest<TwsOrderPackagePreview>("POST", "/execution-assistant/order-packages/preview", req),
+  placePaperOrderPackage: (req: TwsOrderPackageRequest) =>
+    sidecarRequest<TwsOrderPackageSubmission>("POST", "/execution-assistant/order-packages/place-paper", req),
+  placeLiveOrderPackage: (req: TwsOrderPackageRequest) =>
+    sidecarRequest<TwsOrderPackageSubmission>("POST", "/execution-assistant/order-packages/place-live", req),
 } as const;
