@@ -112,3 +112,93 @@ def test_place_paper_package_revalidates_lot_quantities_at_submit_time():
     assert r.status_code == 422
     assert r.json()["detail"]["error"] == "invalid_order_package"
     assert adapter.place_order_package_calls == 0
+
+
+# ── Repair: isolate each lot under its own parent ────────────────────────────
+#
+# Paper testing against a real TWS account proved a single shared parent entry
+# is unsafe: TWS auto-links every order sharing one parentId into one
+# OCA-managed cohort regardless of any custom ocaGroup string, which collapsed
+# all lots' exits into one group and normalized every exit's quantity to the
+# parent's full size. Each lot must get its own parent entry, sized to that lot.
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from models.tws_execution_assistant import TwsOrderPackageRequest
+from services.tws_broker_adapter import TwsBrokerAdapter
+from services.tws_order_packages import preview_order_package
+
+
+def test_scale_out_preview_creates_one_entry_parent_per_lot():
+    client = _client()
+    req = _scale_out_request()
+
+    r = client.post("/execution-assistant/order-packages/preview", json=req)
+
+    assert r.status_code == 200
+    legs = r.json()["legs"]
+    entry_legs = {leg["role"]: leg for leg in legs if leg["parent_ref"] is None}
+
+    assert len(entry_legs) == len(req["lots"])  # one parent per lot, not one shared parent
+    for i, lot in enumerate(req["lots"]):
+        entry_role = f"lot{i}_entry"
+        assert entry_role in entry_legs
+        assert entry_legs[entry_role]["quantity"] == lot["quantity"]  # sized to its own lot, not the combined total
+        exits = [leg for leg in legs if leg["role"].startswith(f"lot{i}_") and leg["parent_ref"] is not None]
+        assert len(exits) == 3  # target + stop-or-trail + moc fallback
+        assert all(leg["parent_ref"] == entry_role for leg in exits)  # never another lot's entry
+
+
+def test_place_order_package_isolates_each_lot_under_its_own_parent():
+    """Adapter-level regression test using a fake IB client: proves the actual
+    broker order graph keeps each lot's exits under that lot's own parentId and
+    OCA group, with no cross-lot sharing — the property the unsafe shared-parent
+    design violated against a real paper account."""
+    req = TwsOrderPackageRequest(**_scale_out_request())
+    preview = preview_order_package(req)
+
+    adapter = TwsBrokerAdapter()
+    adapter._state = "connected"
+    adapter._connected_port = 4002  # paper port
+
+    placed = []
+
+    class _FakeTrade:
+        def __init__(self, order):
+            self.order = order
+            self.orderStatus = SimpleNamespace(status="PreSubmitted")
+
+    class _FakeEvent:
+        def __iadd__(self, fn):
+            return self
+
+        def __isub__(self, fn):
+            return self
+
+    fake_ib = MagicMock()
+    fake_ib.isConnected.return_value = True
+    fake_ib.client.getReqId.side_effect = iter(range(1, 100))
+    fake_ib.errorEvent = _FakeEvent()
+    fake_ib.placeOrder.side_effect = lambda contract, order: placed.append(order) or _FakeTrade(order)
+    adapter._ib = fake_ib
+
+    asyncio.run(adapter.place_order_package(preview, mode="paper"))
+
+    by_role = {o.orderRef.rsplit(":", 1)[-1]: o for o in placed}
+    entry_ids = {role: o.orderId for role, o in by_role.items() if role.endswith("_entry")}
+    assert len(entry_ids) == len(req.lots)
+
+    oca_groups = []
+    for i in range(len(req.lots)):
+        entry_role = f"lot{i}_entry"
+        exit_roles = [r for r in by_role if r.startswith(f"lot{i}_") and not r.endswith("_entry")]
+        assert exit_roles
+        for role in exit_roles:
+            assert by_role[role].parentId == entry_ids[entry_role]  # only this lot's own parent
+            other_parent_ids = {pid for r, pid in entry_ids.items() if r != entry_role}
+            assert by_role[role].parentId not in other_parent_ids  # never another lot's parent
+            oca_groups.append(by_role[role].ocaGroup)
+
+    assert len(set(oca_groups)) == len(req.lots)  # each lot's OCA group is distinct, none shared

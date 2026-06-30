@@ -70,25 +70,34 @@ def _validate_scale_out_ladder(req: TwsOrderPackageRequest) -> list[str]:
 
 
 def _scale_out_ladder_legs(req: TwsOrderPackageRequest, package_id: str) -> list[TwsOrderLegPreview]:
-    legs = [
-        TwsOrderLegPreview(
-            role="entry",
-            side="BUY",
-            quantity=req.quantity,
+    """Build one isolated parent-entry per lot.
+
+    TWS auto-links every order sharing a parentId into one OCA-managed cohort,
+    independent of any custom ocaGroup string (confirmed against a live paper
+    account: a single shared "entry" parent collapsed all lots' exits into one
+    TWS-assigned OCA group and normalized every exit's quantity to the parent's
+    full size). Giving each lot its own parent entry, sized to that lot only,
+    keeps TWS's auto-linking scoped per lot instead of across the whole package.
+    """
+    legs: list[TwsOrderLegPreview] = []
+    for i, lot in enumerate(req.lots):
+        entry_role = f"lot{i}_entry"
+        oca_group = f"ORBIT-{package_id}-LOT{i}"
+        legs.append(TwsOrderLegPreview(
+            role=entry_role,
+            side=req.side,
+            quantity=lot.quantity,
             order_type=req.order_type,
             limit_price=req.limit_price,
             transmit=False,
-        )
-    ]
-    for i, lot in enumerate(req.lots):
-        oca_group = f"ORBIT-{package_id}-LOT{i}"
+        ))
         legs.append(TwsOrderLegPreview(
             role=f"lot{i}_target",
             side="SELL",
             quantity=lot.quantity,
             order_type="LMT",
             limit_price=lot.target_price,
-            parent_ref="entry",
+            parent_ref=entry_role,
             oca_group=oca_group,
             transmit=False,
         ))
@@ -99,7 +108,7 @@ def _scale_out_ladder_legs(req: TwsOrderPackageRequest, package_id: str) -> list
                 quantity=lot.quantity,
                 order_type="TRAIL",
                 trail=lot.trail,
-                parent_ref="entry",
+                parent_ref=entry_role,
                 oca_group=oca_group,
                 transmit=False,
             ))
@@ -110,7 +119,7 @@ def _scale_out_ladder_legs(req: TwsOrderPackageRequest, package_id: str) -> list
                 quantity=lot.quantity,
                 order_type="STP",
                 stop_price=lot.stop_price,
-                parent_ref="entry",
+                parent_ref=entry_role,
                 oca_group=oca_group,
                 transmit=False,
             ))
@@ -119,12 +128,12 @@ def _scale_out_ladder_legs(req: TwsOrderPackageRequest, package_id: str) -> list
             side="SELL",
             quantity=lot.quantity,
             order_type="MOC",
-            parent_ref="entry",
+            parent_ref=entry_role,
             oca_group=oca_group,
             transmit=False,
         ))
 
-    # TWS only routes the package once the final child transmits.
+    # TWS only routes the whole package once the final child transmits.
     legs[-1] = legs[-1].model_copy(update={"transmit": True})
     return legs
 

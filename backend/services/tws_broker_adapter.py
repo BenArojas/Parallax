@@ -543,11 +543,15 @@ class TwsBrokerAdapter:
         """Submit a previously previewed order package (e.g. a scale-out ladder).
 
         Re-runs the same defense-in-depth guard as place_order before building any
-        order. Generates every leg's orderId up front via getReqId() so child legs
-        can carry a valid parentId pointing at the package's first (root) leg —
-        mirrors ib_async's own IB.bracketOrder() pattern. Legs are placed in preview
-        order (root first) with transmit=False on every leg except the last, so TWS
-        does not route a partial package.
+        order. Generates every leg's orderId up front via getReqId() so each child
+        can carry a valid parentId — mirrors ib_async's own IB.bracketOrder()
+        pattern. A package may contain multiple independent parent legs (e.g. one
+        per scale-out lot); each child's parentId is resolved by role, never a
+        single shared root, since TWS auto-links every order sharing one parentId
+        into one OCA-managed cohort regardless of any custom ocaGroup — sharing a
+        root across lots would silently merge their otherwise-isolated exits.
+        Legs are placed in preview order with transmit=False on every leg except
+        the very last, so TWS does not route a partial package.
         """
         self._ensure_order_mutation_allowed(mode=mode, live_policy=live_policy)
 
@@ -555,7 +559,7 @@ class TwsBrokerAdapter:
             conId=preview.conid, symbol=preview.symbol, secType="STK", exchange="SMART", currency="USD"
         )
         order_ids = [self._ib.client.getReqId() for _ in preview.legs]
-        root_order_id = order_ids[0]
+        order_id_by_role = {leg.role: order_ids[i] for i, leg in enumerate(preview.legs)}
 
         captured_rejects: list[TwsAdvancedReject] = []
 
@@ -592,7 +596,7 @@ class TwsBrokerAdapter:
                 if leg.good_till_date is not None:
                     order.goodTillDate = leg.good_till_date
                 if leg.parent_ref is not None:
-                    order.parentId = root_order_id
+                    order.parentId = order_id_by_role[leg.parent_ref]
                 if leg.oca_group is not None:
                     order.ocaGroup = leg.oca_group
                     order.ocaType = 1
