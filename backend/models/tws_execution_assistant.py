@@ -186,3 +186,66 @@ class TwsOverrideRequest(BaseModel):
     plan_id: str | None = None
     modify: TwsModifyOrderRequest | None = None
     override_codes: list[str]
+
+
+# ── Advanced order packages (Mission 2) ──────────────────────────────────────
+
+TwsAdvancedOrderKind = Literal[
+    "scale_out_ladder", "bracket", "trailing_stop", "gtd", "moc", "loc", "price_condition"
+]
+
+
+class TwsTrailSpec(BaseModel):
+    mode: Literal["amount", "percent"]
+    value: float
+
+
+class TwsScaleOutLotDraft(BaseModel):
+    quantity: float
+    target_price: float
+    stop_price: float | None = None
+    trail: TwsTrailSpec | None = None
+    close_fallback: Literal["MOC"] = "MOC"
+
+
+class TwsOrderPackageRequest(BaseModel):
+    kind: TwsAdvancedOrderKind
+    conid: int
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    quantity: float
+    order_type: str
+    limit_price: float | None = None
+    limit_offset: float | None = None
+    stop_price: float | None = None
+    trail: TwsTrailSpec | None = None
+    good_till_date: str | None = None
+    target_price: float | None = None
+    lots: list[TwsScaleOutLotDraft] = []
+    condition_price: float | None = None
+    condition_is_above: bool | None = None
+
+
+class TwsOrderLegPreview(BaseModel):
+    role: str
+    side: Literal["BUY", "SELL"]
+    quantity: float
+    order_type: str
+    limit_price: float | None = None
+    limit_offset: float | None = None
+    stop_price: float | None = None
+    trail: TwsTrailSpec | None = None
+    tif: str = "DAY"
+    good_till_date: str | None = None
+    parent_ref: str | None = None
+    oca_group: str | None = None
+    transmit: bool = False
+
+
+class TwsOrderPackagePreview(BaseModel):
+    package_id: str
+    kind: TwsAdvancedOrderKind
+    conid: int
+    symbol: str
+    warnings: list[str] = []
+    legs: list[TwsOrderLegPreview]

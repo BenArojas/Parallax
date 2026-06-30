@@ -20,6 +20,8 @@ from models.tws_execution_assistant import (
     TwsLivePolicyStatus,
     TwsModifyOrderRequest,
     TwsOrderActionResult,
+    TwsOrderPackagePreview,
+    TwsOrderPackageRequest,
     TwsOverrideRequest,
     TwsStatusResponse,
 )
@@ -27,6 +29,7 @@ from services.broker_session import BrokerSessionService
 from services.execution_plan import ExecutionPlanService
 from services.tws_broker_adapter import TwsAdvancedRejectError, TwsBrokerAdapter, TwsPlaceOrderGuardError
 from services.tws_live_policy import TwsLivePolicyService
+from services.tws_order_packages import TwsOrderPackageValidationError, preview_order_package
 
 router = APIRouter(prefix="/execution-assistant", tags=["execution-assistant"])
 
@@ -527,4 +530,17 @@ async def override_order(
                 "error": "unknown_outcome",
                 "message": "Override failed unexpectedly. Refresh Open Orders before retrying.",
             },
+        )
+
+
+# ── Advanced order packages (Mission 2) ──────────────────────────────────────
+
+@router.post("/order-packages/preview", response_model=TwsOrderPackagePreview)
+async def preview_order_package_endpoint(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview:
+    try:
+        return preview_order_package(req)
+    except TwsOrderPackageValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_order_package", "errors": exc.errors},
         )
