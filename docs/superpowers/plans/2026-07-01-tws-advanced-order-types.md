@@ -121,14 +121,14 @@ async def place_order_package(
 **Interfaces:**
 - No runtime interface.
 
-- [ ] Update the TWS follow-up missions line to say Mission 2 advanced order types is in progress on `feature/tws-advanced-order-types`.
-- [ ] Run:
+- [x] Update the TWS follow-up missions line to say Mission 2 advanced order types is in progress on `feature/tws-advanced-order-types`.
+- [x] Run:
 
 ```bash
 git diff --check
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add PROJECT_PLAN.md
@@ -147,9 +147,9 @@ git commit -m "docs: mark tws advanced orders in progress"
 - Produces `TwsOrderPackageRequest`, `TwsOrderPackagePreview`, and `preview_order_package(req)`.
 - Produces `POST /execution-assistant/order-packages/preview`.
 
-- [ ] Add the package models listed in the Interfaces section.
-- [ ] Implement `preview_order_package(req)` for `kind="scale_out_ladder"` only.
-- [ ] Validation rules:
+- [x] Add the package models listed in the Interfaces section.
+- [x] Implement `preview_order_package(req)` for `kind="scale_out_ladder"` only.
+- [x] Validation rules:
   - `side` must be `BUY`.
   - `quantity` must be positive.
   - `order_type` must be `MKT` or `LMT`.
@@ -158,15 +158,15 @@ git commit -m "docs: mark tws advanced orders in progress"
   - each lot requires positive `target_price`.
   - each lot requires exactly one stop style: positive `stop_price` or `trail`.
   - percent trail must be greater than `0` and less than `100`.
-- [ ] Preview output for each lot must include target sell, stop/trailing sell, and `MOC` fallback sell with one generated `oca_group`.
-- [ ] Add one public-boundary test: invalid lot quantities return `422` and no broker call is available from this preview-only route.
-- [ ] Run:
+- [x] Preview output for each lot must include target sell, stop/trailing sell, and `MOC` fallback sell with one generated `oca_group`. **Superseded 2026-07-01:** each lot also gets its own parent entry leg — see Task 2.5.
+- [x] Add one public-boundary test: invalid lot quantities return `422` and no broker call is available from this preview-only route.
+- [x] Run:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py -q
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add backend/models/tws_execution_assistant.py backend/services/tws_order_packages.py backend/routers/execution_assistant.py backend/tests/test_execution_assistant_advanced_orders.py
@@ -186,31 +186,92 @@ git commit -m "feat: preview tws scale-out packages"
 - Produces `TwsOrderPackageSubmission`.
 - Produces `POST /execution-assistant/order-packages/place-paper` and `/place-live`.
 
-- [ ] Add `TwsOrderPackageSubmission` with `package_id`, `status`, `order_ids`, and submitted leg summaries.
-- [ ] Add router endpoints:
+- [x] Add `TwsOrderPackageSubmission` with `package_id`, `status`, `order_ids`, and submitted leg summaries.
+- [x] Add router endpoints:
   - `POST /execution-assistant/order-packages/place-paper`
   - `POST /execution-assistant/order-packages/place-live`
-- [ ] In the live endpoint, call `policy.assert_live_allowed(account_id=adapter.connected_account_id(), host=adapter.connected_host(), port=adapter.connected_port(), is_connected=adapter.is_connected(), is_paper_port=adapter.is_paper_port())` before adapter submit.
-- [ ] In `TwsBrokerAdapter.place_order_package`, re-run `_ensure_order_mutation_allowed(mode=mode, live_policy=live_policy)` before building orders.
-- [ ] Build a stock `Contract(conId=req.conid, symbol=req.symbol, secType="STK", exchange="SMART", currency="USD")`.
-- [ ] Generate parent/child order IDs with `self._ib.client.getReqId()`.
-- [ ] Set `parentId` on all exit legs and set per-lot `ocaGroup`/`ocaType=1`.
-- [ ] Set `transmit=False` on every order except the final child.
-- [ ] Add `orderRef="ORBIT:TWS:<package_id>:<role>"` to every leg.
-- [ ] Preserve advanced reject handling and unknown-outcome handling from `place_order`.
-- [ ] Add one public-boundary test: live place without armed policy returns `403` and adapter submit is not called.
-- [ ] Run:
+- [x] In the live endpoint, call `policy.assert_live_allowed(account_id=adapter.connected_account_id(), host=adapter.connected_host(), port=adapter.connected_port(), is_connected=adapter.is_connected(), is_paper_port=adapter.is_paper_port())` before adapter submit.
+- [x] In `TwsBrokerAdapter.place_order_package`, re-run `_ensure_order_mutation_allowed(mode=mode, live_policy=live_policy)` before building orders.
+- [x] Build a stock `Contract(conId=req.conid, symbol=req.symbol, secType="STK", exchange="SMART", currency="USD")`.
+- [x] Generate parent/child order IDs with `self._ib.client.getReqId()`.
+- [x] Set `parentId` on all exit legs and set per-lot `ocaGroup`/`ocaType=1`. **Superseded 2026-07-01:** a single shared parent let TWS merge all lots into one OCA cohort — see Task 2.5.
+- [x] Set `transmit=False` on every order except the final child.
+- [x] Add `orderRef="ORBIT:TWS:<package_id>:<role>"` to every leg.
+- [x] Preserve advanced reject handling and unknown-outcome handling from `place_order`.
+- [x] Add one public-boundary test: live place without armed policy returns `403` and adapter submit is not called.
+- [x] Run:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py tests/test_execution_assistant_live_policy.py -q
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add backend/models/tws_execution_assistant.py backend/routers/execution_assistant.py backend/services/tws_broker_adapter.py backend/tests/test_execution_assistant_advanced_orders.py
 git commit -m "feat: submit tws scale-out packages"
 ```
+
+Also committed (same batch, after code review): `fix: revalidate tws order packages at submit time and scope OCA groups per package` — `/place-paper` and `/place-live` now accept `TwsOrderPackageRequest` and re-derive the trusted preview server-side via `preview_order_package(req)` instead of trusting a client-supplied `TwsOrderPackagePreview`.
+
+### Task 2.5: Repair Scale-Out Parent Isolation And Add Minimal Cockpit Path
+
+**Why:** manual paper-account testing (2026-07-01) proved Task 2's shared-parent
+design unsafe — see "Per-Lot Parent Isolation" in the design doc. TWS auto-links
+every order sharing one `parentId` into one OCA cohort regardless of any custom
+`ocaGroup` string, so the original single combined entry caused all three lots'
+exits to merge into one TWS-assigned group with every exit's quantity normalized
+to the full parent size.
+
+**Files:**
+- Modify: `backend/services/tws_order_packages.py`
+- Modify: `backend/services/tws_broker_adapter.py`
+- Modify: `backend/tests/test_execution_assistant_advanced_orders.py`
+- Modify: `src/modules/tws-execution-assistant/api.ts`
+- Create: `src/modules/tws-execution-assistant/ScaleOutLadderPanel.tsx`
+- Modify: `src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx`
+- Modify: this plan and the design doc.
+
+**Interfaces:** unchanged (`TwsOrderPackageRequest` → `preview_order_package` →
+`TwsOrderPackagePreview` → `place_order_package`); only the internal leg graph
+changes shape.
+
+- [x] `_scale_out_ladder_legs` builds one parent entry leg per lot (role
+      `lot{i}_entry`, sized to that lot's own quantity, `parent_ref=None`),
+      with that lot's target/stop-or-trail/MOC-fallback referencing only
+      `lot{i}_entry` and sharing only that lot's `oca_group`.
+- [x] `TwsBrokerAdapter.place_order_package` resolves each leg's `parentId` by
+      role (`order_id_by_role[leg.parent_ref]`) instead of a single shared root,
+      so multiple independent parents in one package resolve correctly.
+- [x] Add one public-boundary preview test proving one entry parent per lot,
+      each sized to its own lot, with exits referencing only their own lot.
+- [x] Add one adapter-level test (fake IB client) proving the actual broker
+      order graph has no shared `parentId` or `oca_group` across lots.
+- [x] Add minimal cockpit path: `ScaleOutLadderPanel` (symbol/conid/entry +
+      per-lot quantity/target/stop-or-trail inputs, preview table showing
+      role/side/qty/type/price/parent/OCA/transmit per leg, paper/live submit
+      via existing `twsApi`/`isLiveSession` patterns). Mounted in
+      `TwsExecutionAssistantModule.tsx` below Positions/Open Orders.
+- [x] Run:
+
+```bash
+cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py tests/test_execution_assistant_live_policy.py tests/test_execution_assistant_reconciliation.py -q
+npm run typecheck
+git diff --check
+```
+
+- [x] Commit:
+
+```bash
+git add backend/services/tws_order_packages.py backend/services/tws_broker_adapter.py backend/tests/test_execution_assistant_advanced_orders.py
+git commit -m "fix: isolate tws scale-out lots by parent order"
+git add src/modules/tws-execution-assistant/api.ts src/modules/tws-execution-assistant/ScaleOutLadderPanel.tsx src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx
+git commit -m "feat: add scale-out cockpit package flow"
+git add docs/superpowers/specs/2026-06-30-tws-advanced-order-types-design.md docs/superpowers/plans/2026-07-01-tws-advanced-order-types.md
+git commit -m "docs: update tws advanced order plan for vertical slices"
+```
+
+**Pending:** manual paper-account smoke against the cockpit UI (human present) to confirm TWS shows isolated per-lot parents/OCA groups end to end — see report for exact steps.
 
 ### Task 3: Reconcile Package Orders
 
@@ -398,10 +459,21 @@ git commit -m "docs: update tws advanced order status"
 
 ## Recommended Batches
 
-- Batch 1: Tasks 0 and 1. Review the contract before broker mutation exists.
-- Batch 2: Tasks 2 and 3. Review immediately because this introduces grouped broker mutation and reconciliation fields.
-- Batch 3: Tasks 4 and 5. Brackets, trailing, good-till-date, market-on-close, and limit-on-close share the same order builder.
+- Batch 1: Tasks 0 and 1. Review the contract before broker mutation exists. DONE.
+- Batch 2: Tasks 2 and 3 (reconciliation fields only; package reconciliation
+  warnings still open). DONE. Code review on this batch found a client-trusted
+  preview at submit time and colliding OCA names; both fixed same batch.
+- Batch 2.5 (unplanned, vertical-slice repair): Task 2.5. A focused paper-account
+  smoke test on Batch 2's output surfaced the shared-parent OCA/quantity bug
+  before Batch 3 could build brackets/trailing on top of the same broken
+  pattern. Repaired per-lot parent isolation and pulled the minimal scale-out
+  cockpit UI forward from Batch 5 so the repair is reviewable end-to-end
+  against a real paper account, not just unit tests. DONE pending manual smoke.
+- Batch 3: Tasks 4 and 5. Brackets, trailing, good-till-date, market-on-close, and limit-on-close share the same order builder — they inherit the per-lot/per-group parent-isolation pattern from Task 2.5 (bracket has exactly one group already, so it is unaffected by the multi-group case).
 - Batch 4: Task 6 only. Conditions use a separate TWS API surface.
-- Batch 5: Tasks 7 and 8. UI and final docs after backend contracts settle.
+- Batch 5: Task 8 only (remaining cockpit UI for bracket/trailing/GTD/MOC/LOC/condition) and final docs after backend contracts settle. Scale-out's own cockpit slice shipped early in Batch 2.5.
 
-Run code review after every batch. Run human manual smoke only after Batch 5, unless Batch 2 needs a focused paper-only broker smoke before continuing.
+Run code review after every batch. A focused paper-only broker smoke is
+valuable after any batch that changes broker order construction (Batch 2 and
+2.5 both needed one) — do not wait for Batch 5 to do the first real-account
+check of a new construction pattern.
