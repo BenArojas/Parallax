@@ -271,7 +271,13 @@ git add docs/superpowers/specs/2026-06-30-tws-advanced-order-types-design.md doc
 git commit -m "docs: update tws advanced order plan for vertical slices"
 ```
 
-**Pending:** manual paper-account smoke against the cockpit UI (human present) to confirm TWS shows isolated per-lot parents/OCA groups end to end — see report for exact steps.
+**Resolved 2026-07-01:** manual paper-account smoke against the cockpit UI confirmed TWS shows isolated per-lot parents and distinct OCA groups end to end.
+
+That smoke pass also surfaced three real UX bugs the unit tests couldn't catch, fixed in the same window:
+- `fix: scale-out panel overflow, modify routing, and spacing parity` — the Execution Plan/Chart grid used `min-h-[405px]` (a floor, not a ceiling), so a tall Scale-Out form grew the panel into the Positions/Open Orders section below instead of scrolling internally; the Execution Plan ternary checked `planMode === "scale_out"` before `editingOrder`/`advancedReject`, so clicking "Modify" on any open order silently did nothing while Scale-Out was selected; Scale-Out's inputs/gaps were denser than Standard's.
+- `fix: stop relying on percentage height through grid stretch for panel sizing` — `h-full` resolving against a CSS Grid row sized via stretch alignment is inconsistent across engines (including WebKit/Tauri); switched the panel and chart aside to an explicit `h-[480px]` plus `overflow-hidden` as a hard backstop.
+
+Separately, user feedback ("I don't like the UI... make it feel less robotic") led to a follow-up UX pass, brainstormed and spec'd properly rather than patched ad hoc: see `docs/superpowers/specs/2026-07-01-scale-out-cockpit-ux-design.md` (toggle mechanism, copy voice, tooltip scope, lot-card layout — all chosen via the visual-companion brainstorming flow and user approval). Implemented in `feat: merge scale-out ladder into Execution Plan panel`. **This design doc, not Task 7 below, is now the canonical reference for how cockpit UI for any future order kind should look and feel** — see the note on Task 7.
 
 ### Task 3: Reconcile Package Orders
 
@@ -401,18 +407,31 @@ git commit -m "feat: add tws price condition package"
 **Interfaces:**
 - Consumes backend package request, preview, and submission contracts.
 
-- [ ] Add TypeScript package request/preview/submission types matching backend names.
-- [ ] Add `twsApi.previewOrderPackage`, `placePaperOrderPackage`, and `placeLiveOrderPackage`.
-- [ ] Add a compact advanced-order mode in the cockpit for:
-  - scale-out ladder.
+**Superseded 2026-07-01:** scale-out's cockpit slice already shipped in Task 2.5,
+via a Standard/Scale-Out toggle merged into the Execution Plan panel rather than
+a free-standing "advanced-order mode." That pattern — and the full rationale
+for the toggle mechanism, copy voice, tooltip scope, and lot-card layout — is
+documented in `docs/superpowers/specs/2026-07-01-scale-out-cockpit-ux-design.md`.
+**Extend that pattern for the remaining kinds; do not design a separate UI
+paradigm per kind.** Concretely: the toggle likely grows from 2 options to N
+(one per implemented kind, or a kind dropdown once N gets large), each kind
+reuses the same intro-blurb / tooltip / live-readout / preview-table
+conventions already built for scale-out. Brainstorm any new toggle-shape
+decision the same way scale-out's was (visual companion, get approval) rather
+than guessing — this is still a user-facing design question, not a pure
+implementation one.
+
+- [ ] Add TypeScript package request/preview/submission types for the new kinds (`TwsOrderPackageRequest` etc. already exist from Task 2.5 — extend, don't duplicate).
+- [ ] Add `twsApi` calls for any new endpoints the new kinds need (none expected — `previewOrderPackage`/`placePaperOrderPackage`/`placeLiveOrderPackage` already exist and are kind-agnostic).
+- [ ] Extend the existing toggle/builder pattern to cover:
   - bracket.
   - trailing stop fixed/percent.
   - good-till-date.
   - market-on-close.
   - limit-on-close.
   - price condition.
-- [ ] Show preview legs with role, side, quantity, order type, prices, trail, parent, OCA group, and transmit flag.
-- [ ] Route submit to paper or live package endpoint using the existing live-session state.
+- [ ] Preview legs already show role, side, quantity, order type, prices, trail, parent, OCA group, and transmit flag (built in Task 2.5) — confirm this still reads correctly for each new kind's leg shape, don't rebuild it.
+- [ ] Submit already routes to paper/live package endpoints using existing live-session state (built in Task 2.5) — no new routing needed unless a kind's UX requires it.
 - [ ] Run:
 
 ```bash
