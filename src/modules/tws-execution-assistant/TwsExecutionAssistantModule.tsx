@@ -170,7 +170,7 @@ function Panel({
   return (
     <section
       className={cn(
-        "flex min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm transition-shadow duration-300",
+        "flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-[var(--bg-1)] shadow-sm transition-shadow duration-300",
         accent === "purple" && "shadow-[0_0_0_1px_rgba(180,77,255,0.12),0_0_20px_rgba(180,77,255,0.06)]",
         className,
       )}
@@ -766,7 +766,7 @@ export function TwsExecutionAssistantModule() {
         <div className="grid h-[480px] shrink-0 gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <Panel
             title="Execution Plan"
-            className="h-full"
+            className="h-[480px]"
             accent={planMode === "scale_out" ? "purple" : "cyan"}
             sweep={sweeping}
             headerRight={
@@ -1401,7 +1401,7 @@ export function TwsExecutionAssistantModule() {
                 </div>
               )}
             </Panel>
-          <aside className="h-full">
+          <aside className="h-[480px]">
             <section className="flex h-full min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm">
               <div className="shrink-0 border-b border-border px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
