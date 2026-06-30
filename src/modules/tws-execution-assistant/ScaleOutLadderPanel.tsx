@@ -280,44 +280,44 @@ export function ScaleOutLadderPanel({
 
   return (
     <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pb-2">
-        <div className="rounded border border-[var(--clr-purple)]/25 bg-[var(--glow-purple)] px-3 py-2.5 text-[11px] leading-5 text-[var(--text-2)]">
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pb-2">
+        <div className="rounded border border-[var(--clr-purple)]/25 bg-[var(--glow-purple)] px-4 py-3 text-xs leading-5 text-[var(--text-2)]">
           Scale-out ladders split your exit across multiple price targets. Each lot gets its own protective stop
           (or trailing stop) and an end-of-day fallback — so a partial fill can never leave shares unprotected.
         </div>
         <button
           type="button"
-          className="self-start rounded border border-dashed border-[var(--clr-purple)]/50 px-2.5 py-1 text-[10px] text-[var(--clr-purple)] transition-colors hover:bg-[var(--glow-purple)] disabled:opacity-50"
+          className="self-start rounded border border-dashed border-[var(--clr-purple)]/50 px-3 py-1.5 text-xs text-[var(--clr-purple)] transition-colors hover:bg-[var(--glow-purple)] disabled:opacity-50"
           disabled={!canDraft}
           onClick={loadExample}
         >
           ↻ Try an example: 20 shares, 3 stages
         </button>
 
-        <div className="grid gap-2 md:grid-cols-4">
-          <label className="space-y-1">
-            <span className="text-[10px] text-[var(--text-3)]">Symbol</span>
+        <div className="grid gap-3 md:grid-cols-4">
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-[var(--text-2)]">Symbol</span>
             <input
-              className="h-8 w-full rounded border border-border bg-[var(--bg-0)] px-2 text-xs uppercase outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm uppercase outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
               value={symbol}
               disabled={!canDraft}
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-[10px] text-[var(--text-3)]">ConID</span>
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-[var(--text-2)]">ConID</span>
             <input
               type="number"
-              className="h-8 w-full rounded border border-border bg-[var(--bg-0)] px-2 font-data text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
               value={conid || ""}
               disabled={!canDraft}
               onChange={(e) => setConid(Number(e.target.value))}
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-[10px] text-[var(--text-3)]">Entry type</span>
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-[var(--text-2)]">Entry type</span>
             <select
-              className="h-8 w-full rounded border border-border bg-[var(--bg-0)] px-2 text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
               value={orderType}
               disabled={!canDraft}
               onChange={(e) => setOrderType(e.target.value as "MKT" | "LMT")}
@@ -327,12 +327,12 @@ export function ScaleOutLadderPanel({
             </select>
           </label>
           {orderType === "LMT" && (
-            <label className="space-y-1">
-              <span className="text-[10px] text-[var(--text-3)]">Entry limit</span>
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-[var(--text-2)]">Entry limit</span>
               <input
                 type="number"
                 step="0.01"
-                className="h-8 w-full rounded border border-border bg-[var(--bg-0)] px-2 font-data text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
                 value={limitPrice}
                 disabled={!canDraft}
                 onChange={(e) => setLimitPrice(e.target.value)}
@@ -341,40 +341,40 @@ export function ScaleOutLadderPanel({
           )}
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-3">
           {lots.map((lot, i) => {
             const readout = lotReadout(lot);
             return (
-              <div key={i} className="rounded-md border border-border/70 bg-[var(--bg-0)] p-2.5">
-                <div className="flex flex-wrap items-end gap-2.5">
+              <div key={i} className="rounded-md border border-border/70 bg-[var(--bg-0)] p-3">
+                <div className="flex flex-wrap items-end gap-3">
                   <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[11px] font-bold"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold"
                     style={{ background: "var(--glow-purple)", color: "var(--clr-purple)" }}
                   >
                     {i + 1}
                   </span>
-                  <label className="space-y-1">
-                    <span className="text-[10px] text-[var(--text-3)]">Qty</span>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-[var(--text-2)]">Qty</span>
                     <input
                       type="number"
-                      className="h-8 w-20 rounded border border-border bg-[var(--bg-1)] px-2 font-data text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+                      className="h-9 w-20 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
                       value={lot.quantity}
                       disabled={!canDraft}
                       onChange={(e) => updateLot(i, { quantity: e.target.value })}
                     />
                   </label>
-                  <label className="space-y-1">
-                    <span className="text-[10px] text-[var(--text-3)]">Target</span>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-[var(--text-2)]">Target</span>
                     <input
                       type="number"
                       step="0.01"
-                      className="h-8 w-24 rounded border border-border bg-[var(--bg-1)] px-2 font-data text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+                      className="h-9 w-24 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
                       value={lot.target_price}
                       disabled={!canDraft}
                       onChange={(e) => updateLot(i, { target_price: e.target.value })}
                     />
                   </label>
-                  <div className="flex items-center gap-1.5 pb-1.5 text-[10px] text-[var(--text-3)]">
+                  <div className="flex items-center gap-1.5 pb-2 text-xs font-medium text-[var(--text-2)]">
                     <label className="flex items-center gap-1.5">
                       <input
                         type="checkbox"
@@ -387,26 +387,26 @@ export function ScaleOutLadderPanel({
                     <Hint text="A trailing stop follows the price up and triggers a sell if it falls back by this much — useful when you don't want to fix the stop in advance." />
                   </div>
                   {lot.use_trail ? (
-                    <label className="space-y-1">
-                      <span className="text-[10px] text-[var(--text-3)]">Trail $</span>
+                    <label className="space-y-1.5">
+                      <span className="text-xs font-medium text-[var(--text-2)]">Trail $</span>
                       <input
                         type="number"
                         step="0.01"
-                        className="h-8 w-20 rounded border border-border bg-[var(--bg-1)] px-2 font-data text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+                        className="h-9 w-20 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
                         value={lot.trail_value}
                         disabled={!canDraft}
                         onChange={(e) => updateLot(i, { trail_value: e.target.value })}
                       />
                     </label>
                   ) : (
-                    <label className="space-y-1">
-                      <span className="flex items-center gap-1 text-[10px] text-[var(--text-3)]">
+                    <label className="space-y-1.5">
+                      <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
                         Stop <Hint text="A fixed protective stop. If the price falls to this level, the lot sells to limit the loss." />
                       </span>
                       <input
                         type="number"
                         step="0.01"
-                        className="h-8 w-20 rounded border border-border bg-[var(--bg-1)] px-2 font-data text-xs outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+                        className="h-9 w-20 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
                         value={lot.stop_price}
                         disabled={!canDraft}
                         onChange={(e) => updateLot(i, { stop_price: e.target.value })}
@@ -415,7 +415,7 @@ export function ScaleOutLadderPanel({
                   )}
                   <button
                     type="button"
-                    className="ml-auto h-8 rounded border border-[var(--clr-red)]/40 px-2 text-[10px] text-[var(--clr-red)] hover:bg-[var(--clr-red)]/10 disabled:opacity-50"
+                    className="ml-auto h-9 rounded border border-[var(--clr-red)]/40 px-2.5 text-xs text-[var(--clr-red)] hover:bg-[var(--clr-red)]/10 disabled:opacity-50"
                     disabled={!canDraft || lots.length <= 1}
                     onClick={() => setLots((prev) => prev.filter((_, idx) => idx !== i))}
                   >
@@ -423,7 +423,7 @@ export function ScaleOutLadderPanel({
                   </button>
                 </div>
                 {readout && (
-                  <p className="mt-2 text-[10px] text-[var(--clr-purple)]">
+                  <p className="mt-2.5 text-xs text-[var(--clr-purple)]">
                     <span className="text-[var(--text-3)]">→</span> {readout}
                   </p>
                 )}
@@ -432,7 +432,7 @@ export function ScaleOutLadderPanel({
           })}
           <button
             type="button"
-            className="h-7 w-full rounded border border-dashed border-border text-[10px] text-[var(--text-2)] hover:bg-[var(--bg-0)] disabled:opacity-50"
+            className="h-8 w-full rounded border border-dashed border-border text-xs text-[var(--text-2)] hover:bg-[var(--bg-0)] disabled:opacity-50"
             disabled={!canDraft}
             onClick={() => setLots((prev) => [...prev, { ...EMPTY_LOT }])}
           >

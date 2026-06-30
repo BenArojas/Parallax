@@ -763,7 +763,7 @@ export function TwsExecutionAssistantModule() {
           </div>
         )}
 
-        <div className="grid min-h-[405px] gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="grid h-[480px] shrink-0 gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <Panel
             title="Execution Plan"
             className="h-full"
@@ -794,9 +794,7 @@ export function TwsExecutionAssistantModule() {
               </div>
             }
           >
-              {planMode === "scale_out" ? (
-                <ScaleOutLadderPanel canDraft={canDraft} isLiveSession={isLiveSession} />
-              ) : advancedReject != null ? (
+              {advancedReject != null ? (
                 <div className="flex h-full flex-col">
                   <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pb-2">
                     <div className="rounded border border-[var(--clr-orange)]/40 bg-[var(--clr-orange)]/8 px-4 py-3">
@@ -1203,6 +1201,8 @@ export function TwsExecutionAssistantModule() {
                   </div>
 
                 </div>
+              ) : planMode === "scale_out" ? (
+                <ScaleOutLadderPanel canDraft={canDraft} isLiveSession={isLiveSession} />
               ) : (
                 <div className="relative flex h-full flex-col">
                   <div className={cn("flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pb-2", !canDraft && "opacity-45")}>
@@ -1513,6 +1513,9 @@ export function TwsExecutionAssistantModule() {
                         order={o}
                         onCancel={(id) => cancelOrderMutation.mutate(id)}
                         onModify={(order) => {
+                          // Modify applies to any individual order by order_id (package-agnostic),
+                          // but its form lives in Standard mode — switch so the toggle matches what's shown.
+                          setPlanMode("standard");
                           setEditingOrder(order);
                           setModifyForm({ quantity: order.quantity, limit_price: order.lmt_price, stop_price: order.stop_price });
                           setModifyReview(false);
