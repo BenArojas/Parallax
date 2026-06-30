@@ -298,6 +298,22 @@
     50% { box-shadow: 0 0 16px currentColor; }
   }
 
+  /* One-shot light sweep across a panel header — e.g. on mode toggle */
+  .panel-mode-sweep::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -30%;
+    width: 30%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--clr-purple), transparent);
+    animation: panel-mode-sweep 500ms ease-out;
+  }
+  @keyframes panel-mode-sweep {
+    from { left: -30%; }
+    to { left: 130%; }
+  }
+
   /* Gradient text for logo */
   .text-gradient-brand {
     background: linear-gradient(135deg, var(--clr-cyan), var(--clr-blue));

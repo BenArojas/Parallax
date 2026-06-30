@@ -154,17 +154,39 @@ function Panel({
   title,
   children,
   className,
+  headerRight,
+  accent = "cyan",
+  sweep = false,
 }: {
   title: string;
   children: ReactNode;
   className?: string;
+  headerRight?: ReactNode;
+  /** Pro-mode accent — shifts the title color and adds a faint panel glow. */
+  accent?: "cyan" | "purple";
+  /** Plays a one-shot light sweep across the header (e.g. on mode switch). */
+  sweep?: boolean;
 }) {
   return (
-    <section className={cn("flex min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm", className)}>
-      <div className="shrink-0 border-b border-border px-3 py-2">
-        <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
-          {title}
-        </h2>
+    <section
+      className={cn(
+        "flex min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm transition-shadow duration-300",
+        accent === "purple" && "shadow-[0_0_0_1px_rgba(180,77,255,0.12),0_0_20px_rgba(180,77,255,0.06)]",
+        className,
+      )}
+    >
+      <div className={cn("relative shrink-0 overflow-hidden border-b border-border px-3 py-2", sweep && "panel-mode-sweep")}>
+        <div className="flex items-center justify-between gap-2">
+          <h2
+            className={cn(
+              "text-[10px] font-semibold uppercase tracking-wider transition-colors duration-300",
+              accent === "purple" ? "text-[var(--clr-purple)]" : "text-[var(--clr-cyan)]",
+            )}
+          >
+            {title}
+          </h2>
+          {headerRight}
+        </div>
       </div>
       <div className="flex-1 min-h-0 p-3">{children}</div>
     </section>
@@ -266,8 +288,12 @@ function OrderRow({
   );
 }
 
+type PlanMode = "standard" | "scale_out";
+
 export function TwsExecutionAssistantModule() {
   const queryClient = useQueryClient();
+  const [planMode, setPlanMode] = useState<PlanMode>("standard");
+  const [sweeping, setSweeping] = useState(false);
   const [form, setForm] = useState<TwsConnectRequest>(TWS_CONNECT_DEFAULTS);
   const [planForm, setPlanForm] = useState<ExecutionPlanDraftRequest>(PLAN_DEFAULTS);
   const [currentPlan, setCurrentPlan] = useState<ExecutionPlan | null>(null);
@@ -521,6 +547,17 @@ export function TwsExecutionAssistantModule() {
     staleTime: 60_000,
   });
 
+  function selectPlanMode(mode: PlanMode) {
+    if (mode === planMode) return;
+    setPlanMode(mode);
+    if (mode === "scale_out") {
+      setSweeping(true);
+      window.setTimeout(() => setSweeping(false), 500);
+    } else {
+      setSweeping(false);
+    }
+  }
+
   function handleSymbolChange(value: string) {
     setPlanForm((f) => ({ ...f, symbol: value.toUpperCase(), conid: 0 }));
     setSearchResults([]);
@@ -727,8 +764,39 @@ export function TwsExecutionAssistantModule() {
         )}
 
         <div className="grid min-h-[405px] gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <Panel title="Execution Plan" className="h-full">
-              {advancedReject != null ? (
+          <Panel
+            title="Execution Plan"
+            className="h-full"
+            accent={planMode === "scale_out" ? "purple" : "cyan"}
+            sweep={sweeping}
+            headerRight={
+              <div className="flex shrink-0 rounded-full border border-border p-0.5 text-[9px] font-semibold">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    planMode === "standard" ? "bg-[var(--clr-cyan)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                  )}
+                  onClick={() => selectPlanMode("standard")}
+                >
+                  Standard
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    planMode === "scale_out" ? "bg-[var(--clr-purple)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                  )}
+                  onClick={() => selectPlanMode("scale_out")}
+                >
+                  Scale-Out
+                </button>
+              </div>
+            }
+          >
+              {planMode === "scale_out" ? (
+                <ScaleOutLadderPanel canDraft={canDraft} isLiveSession={isLiveSession} />
+              ) : advancedReject != null ? (
                 <div className="flex h-full flex-col">
                   <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pb-2">
                     <div className="rounded border border-[var(--clr-orange)]/40 bg-[var(--clr-orange)]/8 px-4 py-3">
@@ -1459,10 +1527,6 @@ export function TwsExecutionAssistantModule() {
               <EmptyTableState label="No open orders" />
             )}
           </Panel>
-        </div>
-
-        <div className="mt-1.5">
-          <ScaleOutLadderPanel canDraft={canDraft} isLiveSession={isLiveSession} />
         </div>
       </main>
     </div>
