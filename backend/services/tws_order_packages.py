@@ -69,7 +69,7 @@ def _validate_scale_out_ladder(req: TwsOrderPackageRequest) -> list[str]:
     return errors
 
 
-def _scale_out_ladder_legs(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+def _scale_out_ladder_legs(req: TwsOrderPackageRequest, package_id: str) -> list[TwsOrderLegPreview]:
     legs = [
         TwsOrderLegPreview(
             role="entry",
@@ -81,7 +81,7 @@ def _scale_out_ladder_legs(req: TwsOrderPackageRequest) -> list[TwsOrderLegPrevi
         )
     ]
     for i, lot in enumerate(req.lots):
-        oca_group = f"ORBIT-LOT{i}"
+        oca_group = f"ORBIT-{package_id}-LOT{i}"
         legs.append(TwsOrderLegPreview(
             role=f"lot{i}_target",
             side="SELL",
@@ -138,10 +138,11 @@ def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview
     if errors:
         raise TwsOrderPackageValidationError(errors)
 
+    package_id = str(uuid.uuid4())
     return TwsOrderPackagePreview(
-        package_id=str(uuid.uuid4()),
+        package_id=package_id,
         kind=req.kind,
         conid=req.conid,
         symbol=req.symbol,
-        legs=_scale_out_ladder_legs(req),
+        legs=_scale_out_ladder_legs(req, package_id),
     )

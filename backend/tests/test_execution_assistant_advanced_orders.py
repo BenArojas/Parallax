@@ -2,10 +2,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from deps import get_tws_adapter, get_tws_live_policy
-from models.tws_execution_assistant import TwsOrderPackageRequest
 from routers.execution_assistant import router as ea_router
 from services.tws_live_policy import TwsLivePolicyService
-from services.tws_order_packages import preview_order_package
 
 
 def _client() -> TestClient:
@@ -87,10 +85,30 @@ def test_place_live_package_fails_closed_when_not_armed():
     app.dependency_overrides[get_tws_live_policy] = lambda: TwsLivePolicyService()
     client = TestClient(app)
 
-    preview = preview_order_package(TwsOrderPackageRequest(**_scale_out_request()))
-
-    r = client.post("/execution-assistant/order-packages/place-live", json=preview.model_dump())
+    r = client.post("/execution-assistant/order-packages/place-live", json=_scale_out_request())
 
     assert r.status_code == 403
     assert r.json()["detail"]["error"] == "live_session_not_allowlisted"
+    assert adapter.place_order_package_calls == 0
+
+
+def test_place_paper_package_revalidates_lot_quantities_at_submit_time():
+    """Regression test: submit must rebuild the order graph from the request and
+    re-run validation, not trust a client-supplied leg list. A forged submission
+    with mismatched lot quantities must still fail before any broker call."""
+    adapter = _PackageAdapterStub()
+    app = FastAPI()
+    app.include_router(ea_router)
+    app.dependency_overrides[get_tws_adapter] = lambda: adapter
+    client = TestClient(app)
+    req = _scale_out_request(lots=[
+        {"quantity": 5, "target_price": 125, "stop_price": 118},
+        {"quantity": 5, "target_price": 130, "stop_price": 118},
+        {"quantity": 8, "target_price": 135, "trail": {"mode": "amount", "value": 2}},
+    ])
+
+    r = client.post("/execution-assistant/order-packages/place-paper", json=req)
+
+    assert r.status_code == 422
+    assert r.json()["detail"]["error"] == "invalid_order_package"
     assert adapter.place_order_package_calls == 0

@@ -536,8 +536,7 @@ async def override_order(
 
 # ── Advanced order packages (Mission 2) ──────────────────────────────────────
 
-@router.post("/order-packages/preview", response_model=TwsOrderPackagePreview)
-async def preview_order_package_endpoint(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview:
+def _validated_package_preview(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview:
     try:
         return preview_order_package(req)
     except TwsOrderPackageValidationError as exc:
@@ -545,6 +544,11 @@ async def preview_order_package_endpoint(req: TwsOrderPackageRequest) -> TwsOrde
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "invalid_order_package", "errors": exc.errors},
         )
+
+
+@router.post("/order-packages/preview", response_model=TwsOrderPackagePreview)
+async def preview_order_package_endpoint(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview:
+    return _validated_package_preview(req)
 
 
 def _package_unknown_outcome(package_id: str, exc: Exception) -> HTTPException:
@@ -563,9 +567,12 @@ def _package_unknown_outcome(package_id: str, exc: Exception) -> HTTPException:
 
 @router.post("/order-packages/place-paper", response_model=TwsOrderPackageSubmission)
 async def place_paper_order_package(
-    preview: TwsOrderPackagePreview,
+    req: TwsOrderPackageRequest,
     adapter: TwsBrokerAdapter = Depends(get_tws_adapter),
 ) -> TwsOrderPackageSubmission:
+    # The broker order graph is always rebuilt from the validated request here —
+    # never trust a client-supplied TwsOrderPackagePreview for submission.
+    preview = _validated_package_preview(req)
     try:
         return await adapter.place_order_package(preview, mode="paper")
     except TwsPlaceOrderGuardError as exc:
@@ -581,7 +588,7 @@ async def place_paper_order_package(
 
 @router.post("/order-packages/place-live", response_model=TwsOrderPackageSubmission)
 async def place_live_order_package(
-    preview: TwsOrderPackagePreview,
+    req: TwsOrderPackageRequest,
     adapter: TwsBrokerAdapter = Depends(get_tws_adapter),
     policy: TwsLivePolicyService = Depends(get_tws_live_policy),
 ) -> TwsOrderPackageSubmission:
@@ -595,6 +602,7 @@ async def place_live_order_package(
         )
     except TwsPlaceOrderGuardError as exc:
         raise _guard_http_error(exc)
+    preview = _validated_package_preview(req)
     try:
         return await adapter.place_order_package(preview, mode="live", live_policy=policy)
     except TwsPlaceOrderGuardError as exc:
