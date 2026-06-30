@@ -59,6 +59,9 @@ export interface OrderSnapshot {
   stop_price: number | null;
   status: string;
   is_unmanaged: boolean;
+  parent_id: number | null;
+  oca_group: string | null;
+  order_ref: string | null;
 }
 
 export interface ReconciliationSnapshot {

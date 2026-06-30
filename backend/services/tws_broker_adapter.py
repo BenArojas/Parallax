@@ -135,6 +135,18 @@ def _order_stop_price(order: Order) -> float | None:
     return _lmt_price(getattr(order, "auxPrice", None))
 
 
+def _order_parent_id(order: Order) -> int | None:
+    return order.parentId or None
+
+
+def _order_oca_group(order: Order) -> str | None:
+    return order.ocaGroup or None
+
+
+def _order_ref(order: Order) -> str | None:
+    return order.orderRef or None
+
+
 def _apply_plan_prices(order: Order, plan: "ExecutionPlan") -> None:
     if plan.order_type in ("LMT", "STP LMT") and plan.limit_price is not None:
         order.lmtPrice = plan.limit_price
@@ -409,6 +421,9 @@ class TwsBrokerAdapter:
                 stop_price=_order_stop_price(t.order),
                 status=t.orderStatus.status,
                 is_unmanaged=t.order.clientId != self._client_id,
+                parent_id=_order_parent_id(t.order),
+                oca_group=_order_oca_group(t.order),
+                order_ref=_order_ref(t.order),
             )
             for t in self._ib.openTrades()
         ]

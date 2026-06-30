@@ -73,6 +73,9 @@ class OrderSnapshot(BaseModel):
     stop_price: float | None = None
     status: str
     is_unmanaged: bool
+    parent_id: int | None = None
+    oca_group: str | None = None
+    order_ref: str | None = None
 
 
 class ReconciliationSnapshot(BaseModel):
