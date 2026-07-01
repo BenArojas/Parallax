@@ -10,6 +10,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsPackageWarning, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
+import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
+import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
 
 const STATUS_KEY = ["tws-status"];
@@ -267,6 +269,8 @@ function OrderRow({
       <td className="pr-3 font-data text-[var(--text-2)]">{order.order_type}</td>
       <td className="pr-3 font-data text-[var(--text-2)]">{priceDisplay}</td>
       <td className="pr-3 text-[var(--text-2)]">{order.status}</td>
+      <td className="pr-3 text-[var(--text-3)]">{order.parent_id ?? "—"}</td>
+      <td className="pr-3 text-[var(--text-3)]">{order.oca_group ? order.oca_group.split("-").pop() : "—"}</td>
       <td className="pr-2">{order.is_unmanaged && <UnmanagedBadge />}</td>
       <td className="whitespace-nowrap py-1">
         <div className="flex items-center gap-1.5">
@@ -314,6 +318,77 @@ function OrderRow({
   );
 }
 
+function packageLegPrice(order: OrderSnapshot): string {
+  if (order.lmt_price != null && order.stop_price != null)
+    return `STP ${order.stop_price.toFixed(2)} / LMT ${order.lmt_price.toFixed(2)}`;
+  if (order.stop_price != null) return order.stop_price.toFixed(2);
+  if (order.lmt_price != null) return order.lmt_price.toFixed(2);
+  return "—";
+}
+
+/** Scale-out legs are a linked package, not independent orders — no per-leg
+ * Cancel/Modify here. Editing one quantity can require matching changes to
+ * target, stop, and fallback legs together, so that lives in "Manage package". */
+function ScaleOutPackageRows({
+  pkg,
+  onManage,
+}: {
+  pkg: ScaleOutOrderPackage;
+  onManage: () => void;
+}) {
+  const legRows = pkg.lots.flatMap((lot) =>
+    [lot.entry, ...lot.exits]
+      .filter((o): o is OrderSnapshot => o != null)
+      .map((order) => ({ lotIndex: lot.lotIndex, order })),
+  );
+
+  return (
+    <>
+      <tr className="border-t border-border bg-[var(--glow-purple)]/40 text-xs">
+        <td colSpan={10} className="py-1.5 pr-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded bg-[var(--clr-purple)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--clr-purple)]">
+                Scale-Out
+              </span>
+              <span className="font-medium">{pkg.symbol}</span>
+              <span className="text-[var(--text-3)]">pkg {pkg.packageId.slice(0, 8)}</span>
+              {pkg.warnings.length > 0 && (
+                <span className="text-[var(--clr-orange)]">⚠ {pkg.warnings.length}</span>
+              )}
+            </span>
+            <button
+              type="button"
+              className="h-5 shrink-0 rounded border border-[var(--clr-purple)]/50 px-2 text-[10px] text-[var(--clr-purple)] hover:bg-[var(--clr-purple)]/10 active:scale-95"
+              onClick={onManage}
+            >
+              Manage package
+            </button>
+          </div>
+        </td>
+      </tr>
+      {legRows.map(({ lotIndex, order }) => (
+        <tr key={order.order_id} className="border-t border-border/40 text-xs">
+          <td className="py-1 pr-3 pl-4 text-[var(--text-3)]">
+            Lot {lotIndex + 1} · {parseScaleOutOrderRef(order.order_ref)?.roleType ?? "—"}
+          </td>
+          <td className={`pr-3 ${order.side === "BUY" ? "text-[var(--clr-green)]" : "text-[var(--clr-red)]"}`}>
+            {order.side}
+          </td>
+          <td className="pr-3 font-data">{order.quantity}</td>
+          <td className="pr-3 font-data text-[var(--text-2)]">{order.order_type}</td>
+          <td className="pr-3 font-data text-[var(--text-2)]">{packageLegPrice(order)}</td>
+          <td className="pr-3 text-[var(--text-2)]">{order.status}</td>
+          <td className="pr-3 text-[var(--text-3)]">{order.parent_id ?? "—"}</td>
+          <td className="pr-3 text-[var(--text-3)]">{order.oca_group ? order.oca_group.split("-").pop() : "—"}</td>
+          <td className="pr-2" />
+          <td className="whitespace-nowrap py-1 text-[10px] text-[var(--text-3)]">—</td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 type PlanMode = "standard" | "scale_out";
 
 export function TwsExecutionAssistantModule() {
@@ -332,6 +407,7 @@ export function TwsExecutionAssistantModule() {
   const [modifyForm, setModifyForm] = useState<TwsModifyOrderRequest>({ quantity: 1, limit_price: null, stop_price: null });
   const [modifyReview, setModifyReview] = useState(false);
   const [advancedReject, setAdvancedReject] = useState<TwsAdvancedReject | null>(null);
+  const [managedScaleOutPackageId, setManagedScaleOutPackageId] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: STATUS_KEY,
@@ -345,6 +421,11 @@ export function TwsExecutionAssistantModule() {
     refetchInterval: 10000,
     enabled: status?.connected === true,
   });
+
+  const { packages: scaleOutPackages, standaloneOrders } = recon
+    ? groupScaleOutOrders(recon)
+    : { packages: [] as ScaleOutOrderPackage[], standaloneOrders: [] as OrderSnapshot[] };
+  const managedScaleOutPackage = scaleOutPackages.find((p) => p.packageId === managedScaleOutPackageId) ?? null;
 
   const connectMutation = useMutation({
     mutationFn: twsApi.connect,
@@ -820,7 +901,12 @@ export function TwsExecutionAssistantModule() {
               </div>
             }
           >
-              {advancedReject != null ? (
+              {managedScaleOutPackage != null ? (
+                <ScaleOutPackageManagerPanel
+                  pkg={managedScaleOutPackage}
+                  onClose={() => setManagedScaleOutPackageId(null)}
+                />
+              ) : advancedReject != null ? (
                 <div className="flex h-full flex-col">
                   <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pb-2">
                     <div className="rounded border border-[var(--clr-orange)]/40 bg-[var(--clr-orange)]/8 px-4 py-3">
@@ -1536,12 +1622,25 @@ export function TwsExecutionAssistantModule() {
                       <th className="pb-1.5 pr-4 font-medium">Type</th>
                       <th className="pb-1.5 pr-4 font-medium">Price</th>
                       <th className="pb-1.5 pr-4 font-medium">Status</th>
+                      <th className="pb-1.5 pr-4 font-medium">Parent</th>
+                      <th className="pb-1.5 pr-4 font-medium">OCA</th>
                       <th className="pb-1.5 pr-2 font-medium" />
                       <th className="pb-1.5 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {recon.open_orders.map((o) => (
+                    {scaleOutPackages.map((pkg) => (
+                      <ScaleOutPackageRows
+                        key={pkg.packageId}
+                        pkg={pkg}
+                        onManage={() => {
+                          setAdvancedReject(null);
+                          setEditingOrder(null);
+                          setManagedScaleOutPackageId(pkg.packageId);
+                        }}
+                      />
+                    ))}
+                    {standaloneOrders.map((o) => (
                       <OrderRow
                         key={o.order_id}
                         order={o}
