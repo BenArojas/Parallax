@@ -18,6 +18,7 @@ import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage }
 import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
 import { useTwsLiveQuote } from "./useTwsLiveQuote";
+import { useTwsLiveBars } from "./useTwsLiveBars";
 import { useTwsLiveStream } from "./useTwsLiveStream";
 
 const STATUS_KEY = ["tws-status"];
@@ -630,6 +631,7 @@ export function TwsExecutionAssistantModule() {
     enabled: status?.connected === true && planForm.conid > 0,
     staleTime: 60_000,
   });
+  const liveBar = useTwsLiveBars(planForm.conid, activeTimeframe);
 
   /** Single entry point for "Modify" anywhere in Open Orders (standalone rows
    * or from inside a package manager panel). Clears every other transient
@@ -1606,7 +1608,7 @@ export function TwsExecutionAssistantModule() {
                       Loading bars…
                     </div>
                   ) : barsData && barsData.bars.length > 0 ? (
-                    <TwsCandleChart bars={barsData.bars} />
+                    <TwsCandleChart bars={barsData.bars} liveBar={liveBar} />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-center">
                       <div>

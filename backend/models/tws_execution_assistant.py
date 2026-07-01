@@ -223,6 +223,13 @@ class TwsStreamErrorEvent(BaseModel):
     message: str
 
 
+class TwsBarUpdateEvent(BaseModel):
+    type: Literal["tws_bar_update"] = "tws_bar_update"
+    conid: int
+    timeframe: TwsTimeframe
+    bar: BarSnapshot
+
+
 class TwsOrderActionResult(BaseModel):
     order_id: int
     status: str

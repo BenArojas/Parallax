@@ -242,6 +242,13 @@ export interface BarsResponse {
   bars: BarSnapshot[];
 }
 
+export interface TwsBarUpdateEvent {
+  type: "tws_bar_update";
+  conid: number;
+  timeframe: TwsTimeframe;
+  bar: BarSnapshot;
+}
+
 export interface TwsOrderActionResult {
   order_id: number;
   status: string;

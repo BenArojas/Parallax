@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 
 import { useTwsLiveStream, type TwsLiveStreamMessage, type TwsStreamChannel } from "./useTwsLiveStream";
-import type { TwsQuoteStreamEvent, TwsTimeframe } from "./api";
+import type { TwsBarUpdateEvent, TwsQuoteStreamEvent, TwsTimeframe } from "./api";
 
 type TwsStreamChannelEventMap = {
   quote: TwsQuoteStreamEvent;
-  bars: TwsLiveStreamMessage;
+  bars: TwsBarUpdateEvent;
   depth: TwsLiveStreamMessage;
 };
 
 const STREAM_EVENT_TYPES: Record<TwsStreamChannel, string> = {
   quote: "tws_quote",
-  bars: "tws_bars",
+  bars: "tws_bar_update",
   depth: "tws_depth",
 };
 

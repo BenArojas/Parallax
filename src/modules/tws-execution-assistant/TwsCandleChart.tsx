@@ -18,7 +18,7 @@ import type { BarSnapshot } from "./api";
 const VOL_UP   = "rgba(0, 255, 136, 0.18)";
 const VOL_DOWN = "rgba(255, 68, 102, 0.18)";
 
-export function TwsCandleChart({ bars }: { bars: BarSnapshot[] }) {
+export function TwsCandleChart({ bars, liveBar }: { bars: BarSnapshot[]; liveBar?: BarSnapshot | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef  = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -102,6 +102,28 @@ export function TwsCandleChart({ bars }: { bars: BarSnapshot[] }) {
     vol.setData(volData);
     if (candleData.length > 0) chartRef.current?.timeScale().fitContent();
   }, [bars]);
+
+  useEffect(() => {
+    const candle = candleRef.current;
+    const vol = volRef.current;
+    if (!candle || !vol || !liveBar) return;
+
+    // Live ticks can race a symbol/timeframe switch that just reset the
+    // series — skip a patch older than what's already plotted so
+    // lightweight-charts never sees an out-of-order update() call.
+    const lastPlotted = bars[bars.length - 1];
+    if (lastPlotted && liveBar.time < lastPlotted.time) return;
+
+    candle.update({
+      time: liveBar.time as Time,
+      open: liveBar.open, high: liveBar.high, low: liveBar.low, close: liveBar.close,
+    });
+    vol.update({
+      time: liveBar.time as Time,
+      value: liveBar.volume,
+      color: liveBar.close >= liveBar.open ? VOL_UP : VOL_DOWN,
+    });
+  }, [liveBar, bars]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

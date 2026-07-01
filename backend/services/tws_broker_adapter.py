@@ -34,6 +34,7 @@ from models.tws_execution_assistant import (
     ReconciliationSummary,
     TwsAdapterState,
     TwsAdvancedReject,
+    TwsBarUpdateEvent,
     TwsModifyOrderRequest,
     TwsOrderActionResult,
     TwsOrderPackageLegSubmission,
@@ -173,6 +174,7 @@ class TwsBrokerAdapter:
         self._kill_switch_active: bool = False
         self._stream_subscriptions: dict[WebSocket, dict[int, set[str]]] = {}
         self._quote_streams: dict[int, dict[str, object]] = {}
+        self._bar_streams: dict[tuple[int, str], dict[str, object]] = {}
 
         async def _on_connected(*_args: object) -> None:
             await self._broadcast_stream_status(True)
@@ -280,11 +282,16 @@ class TwsBrokerAdapter:
         channels.add(self._stream_channel_key(req))
         if req.channel == "quote":
             await self.subscribe_quote(websocket, req.conid)
+        elif req.channel == "bars":
+            await self.subscribe_bars(websocket, req.conid, req.timeframe or "5m")
 
     async def stream_unsubscribe(self, websocket: WebSocket, req: TwsStreamSubscribeRequest) -> None:
         channel_key = self._stream_channel_key(req)
         if req.channel == "quote":
             self.unsubscribe_quote(websocket, req.conid)
+            return
+        if req.channel == "bars":
+            self.unsubscribe_bars(websocket, req.conid, req.timeframe or "5m")
             return
         self._remove_stream_ownership(websocket, req.conid, channel_key)
 
@@ -294,6 +301,8 @@ class TwsBrokerAdapter:
             for channel_key in list(channels):
                 if channel_key == "quote":
                     self.unsubscribe_quote(websocket, conid)
+                elif channel_key.startswith("bars:"):
+                    self.unsubscribe_bars(websocket, conid, channel_key.split(":", 1)[1])
                 else:
                     self._remove_stream_ownership(websocket, conid, channel_key)
         self._stream_subscriptions.pop(websocket, None)
@@ -302,12 +311,15 @@ class TwsBrokerAdapter:
         for state in self._quote_streams.values():
             state["ticker"].updateEvent -= state["update_handler"]
             self._ib.errorEvent -= state["error_handler"]
+        for state in self._bar_streams.values():
+            state["bar_data_list"].updateEvent -= state["update_handler"]
         self._stream_subscriptions = {
             websocket: {}
             for websocket in list(self._stream_subscriptions)
             if self.stream_socket_is_open(websocket)
         }
         self._quote_streams = {}
+        self._bar_streams = {}
 
     def _remove_stream_ownership(self, websocket: WebSocket, conid: int, channel_key: str) -> None:
         conids = self._stream_subscriptions.setdefault(websocket, {})
@@ -430,6 +442,94 @@ class TwsBrokerAdapter:
         ticker.updateEvent -= state["update_handler"]
         self._ib.errorEvent -= state["error_handler"]
         self._ib.cancelMktData(state["contract"])
+
+    async def _broadcast_bar_event(self, conid: int, timeframe: str) -> None:
+        state = self._bar_streams.get((conid, timeframe))
+        if not state:
+            return
+        bar_data_list = state["bar_data_list"]
+        if not bar_data_list:
+            return
+        last = bar_data_list[-1]
+        try:
+            d = last.date
+            if isinstance(d, datetime):
+                t = int(d.timestamp())
+            elif isinstance(d, date_):
+                t = int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())
+            else:
+                return
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            return
+        event = TwsBarUpdateEvent(
+            conid=conid,
+            timeframe=timeframe,
+            bar=BarSnapshot(
+                time=t, open=last.open, high=last.high, low=last.low,
+                close=last.close, volume=last.volume,
+            ),
+        ).model_dump()
+        channel_key = f"bars:{timeframe}"
+        dead: list[WebSocket] = []
+        for websocket, conids in list(self._stream_subscriptions.items()):
+            if channel_key not in conids.get(conid, set()):
+                continue
+            if not self.stream_socket_is_open(websocket):
+                dead.append(websocket)
+                continue
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                dead.append(websocket)
+        for websocket in dead:
+            self.stream_cleanup(websocket)
+
+    async def subscribe_bars(self, websocket: WebSocket, conid: int, timeframe: str) -> None:
+        key = (conid, timeframe)
+        if key in self._bar_streams:
+            return
+
+        bar_size, duration = self._TF_MAP[timeframe]  # router/model validates; KeyError here is a bug
+        contract = Contract(conId=conid, secType="STK", exchange="SMART", currency="USD")
+        try:
+            bar_data_list = await self._ib.reqHistoricalDataAsync(
+                contract,
+                endDateTime="",
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=True,
+                formatDate=1,
+                keepUpToDate=True,
+            )
+        except (RuntimeError, OSError, asyncio.TimeoutError) as exc:
+            log.warning("Bar stream subscribe failed conid=%s tf=%s: %s", conid, timeframe, exc)
+            return
+
+        def _on_bar_update(*_args: object) -> None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(self._broadcast_bar_event(conid, timeframe))
+
+        bar_data_list.updateEvent += _on_bar_update
+        self._bar_streams[key] = {
+            "bar_data_list": bar_data_list,
+            "update_handler": _on_bar_update,
+        }
+
+    def unsubscribe_bars(self, websocket: WebSocket, conid: int, timeframe: str) -> None:
+        channel_key = f"bars:{timeframe}"
+        self._remove_stream_ownership(websocket, conid, channel_key)
+        if self._stream_has_other_holder(websocket, conid, channel_key):
+            return
+        state = self._bar_streams.pop((conid, timeframe), None)
+        if not state:
+            return
+        bar_data_list = state["bar_data_list"]
+        bar_data_list.updateEvent -= state["update_handler"]
+        self._ib.cancelHistoricalData(bar_data_list)
 
     async def _broadcast_stream_status(self, connected: bool) -> None:
         event = TwsStreamStatusEvent(connected=connected).model_dump()
