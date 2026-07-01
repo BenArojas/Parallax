@@ -14,9 +14,10 @@ import {
 } from "./api";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
 
-type AdvancedKind = "trailing_stop" | "gtd" | "moc" | "loc";
+type AdvancedKind = "trailing_stop" | "gtd" | "moc" | "loc" | "price_condition";
 type TrailOrderType = "TRAIL" | "TRAILLMT";
 type GtdOrderType = "LMT" | "STP" | "STP LMT" | "TRAIL" | "TRAILLMT";
+type PriceConditionOrderType = "MKT" | "LMT";
 
 /** TWS requires "yyyymmdd hh:mm:ss" (seconds mandatory — a freeform text field
  * that let a user type "16:00" without seconds got a real order canceled by
@@ -35,7 +36,18 @@ const KIND_LABEL: Record<AdvancedKind, string> = {
   gtd: "Good-Till-Date",
   moc: "Market-on-Close",
   loc: "Limit-on-Close",
+  price_condition: "Price Condition",
 };
+
+function priceConditionSummary(preview: TwsOrderPackagePreview): string | null {
+  const leg = preview.legs[0];
+  if (!leg || leg.condition_price == null || leg.condition_is_above == null) return null;
+  const direction = leg.condition_is_above ? "above" : "below";
+  const orderDesc = leg.order_type === "LMT" && leg.limit_price != null
+    ? `LMT at $${leg.limit_price.toFixed(2)}`
+    : leg.order_type;
+  return `Wait for ${preview.symbol} ${direction} $${leg.condition_price.toFixed(2)}, then submit ${leg.side} ${leg.quantity} ${orderDesc}.`;
+}
 
 function errorCode(err: unknown): string | null {
   if (err instanceof ApiError) {
@@ -72,6 +84,9 @@ function buildRequest(input: {
   trailValue: string;
   limitOffset: string;
   goodTillDate: string;
+  pcOrderType: PriceConditionOrderType;
+  conditionIsAbove: boolean;
+  conditionPrice: string;
 }): TwsOrderPackageRequest | null {
   const { kind, conid, symbol, side, quantity } = input;
   if (!conid || !symbol) return null;
@@ -101,6 +116,24 @@ function buildRequest(input: {
     const limit = Number(input.limitPrice);
     if (!limit) return null;
     return { ...base, kind, order_type: "LOC", limit_price: limit };
+  }
+
+  if (kind === "price_condition") {
+    const conditionPrice = Number(input.conditionPrice);
+    if (!conditionPrice) return null;
+    let pcLimitPrice: number | null = null;
+    if (input.pcOrderType === "LMT") {
+      pcLimitPrice = Number(input.limitPrice);
+      if (!pcLimitPrice) return null;
+    }
+    return {
+      ...base,
+      kind,
+      order_type: input.pcOrderType,
+      limit_price: pcLimitPrice,
+      condition_price: conditionPrice,
+      condition_is_above: input.conditionIsAbove,
+    };
   }
 
   if (kind === "trailing_stop") {
@@ -176,6 +209,9 @@ export function AdvancedOrderPanel({
   const [trailValue, setTrailValue] = useState("");
   const [limitOffset, setLimitOffset] = useState("");
   const [goodTillDate, setGoodTillDate] = useState("");
+  const [pcOrderType, setPcOrderType] = useState<PriceConditionOrderType>("MKT");
+  const [conditionIsAbove, setConditionIsAbove] = useState(true);
+  const [conditionPrice, setConditionPrice] = useState("");
   const [preview, setPreview] = useState<TwsOrderPackagePreview | null>(null);
   const [submission, setSubmission] = useState<TwsOrderPackageSubmission | null>(null);
 
@@ -232,6 +268,7 @@ export function AdvancedOrderPanel({
   const req = buildRequest({
     kind, conid, symbol, side, quantity, trailOrderType, gtdOrderType,
     limitPrice, stopPrice, trailMode, trailValue, limitOffset, goodTillDate,
+    pcOrderType, conditionIsAbove, conditionPrice,
   });
 
   if (preview) {
@@ -246,6 +283,11 @@ export function AdvancedOrderPanel({
               {isLiveSession ? "LIVE" : "PAPER"}
             </span>
           </div>
+          {preview.kind === "price_condition" && priceConditionSummary(preview) && (
+            <div className="rounded border border-[var(--clr-blue)]/25 bg-[var(--glow-blue)] px-3 py-2 text-xs text-[var(--text-2)]">
+              {priceConditionSummary(preview)}
+            </div>
+          )}
           <table className="w-full text-left text-[11px]">
             <thead>
               <tr className="text-[var(--text-3)]">
@@ -334,7 +376,7 @@ export function AdvancedOrderPanel({
     <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pb-2">
         <div className="flex overflow-hidden rounded border border-border text-[11px] font-semibold">
-          {(["trailing_stop", "gtd", "moc", "loc"] as const).map((k) => (
+          {(["trailing_stop", "gtd", "moc", "loc", "price_condition"] as const).map((k) => (
             <button
               key={k}
               type="button"
@@ -594,6 +636,66 @@ export function AdvancedOrderPanel({
               />
             </label>
           </div>
+        )}
+
+        {kind === "price_condition" && (
+          <>
+            <div className="rounded border border-[var(--clr-blue)]/25 bg-[var(--glow-blue)] px-4 py-3 text-xs leading-5 text-[var(--text-2)]">
+              Waits and watches — the order only submits once the last trade trades above or
+              below the price you set. One condition only, no autonomous market watching beyond
+              this single check.
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-[var(--text-2)]">Condition</span>
+                <select
+                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                  value={conditionIsAbove ? "above" : "below"}
+                  disabled={!canDraft}
+                  onChange={(e) => setConditionIsAbove(e.target.value === "above")}
+                >
+                  <option value="above">Trades above</option>
+                  <option value="below">Trades below</option>
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-[var(--text-2)]">Condition price</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                  value={conditionPrice}
+                  disabled={!canDraft}
+                  onChange={(e) => setConditionPrice(e.target.value)}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
+                <select
+                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                  value={pcOrderType}
+                  disabled={!canDraft}
+                  onChange={(e) => setPcOrderType(e.target.value as PriceConditionOrderType)}
+                >
+                  <option value="MKT">MKT</option>
+                  <option value="LMT">LMT</option>
+                </select>
+              </label>
+              {pcOrderType === "LMT" && (
+                <label className="space-y-1.5">
+                  <span className="text-xs font-medium text-[var(--text-2)]">Limit</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                    value={limitPrice}
+                    disabled={!canDraft}
+                    onChange={(e) => setLimitPrice(e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+          </>
         )}
       </div>
 

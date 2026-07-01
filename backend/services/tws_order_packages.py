@@ -354,6 +354,59 @@ def _loc_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
     )]
 
 
+def _validate_price_condition(req: TwsOrderPackageRequest) -> list[str]:
+    """A price-condition order is a plain MKT/LMT order with one extra trigger
+    attached — not a scale-out lot, bracket, trailing stop, or GTD order, so
+    none of those kinds' fields should ever be set alongside it."""
+    errors: list[str] = []
+    if req.conid <= 0:
+        errors.append("A positive conid is required.")
+    if not req.symbol:
+        errors.append("A symbol is required.")
+    if req.quantity <= 0:
+        errors.append("Quantity must be positive.")
+    if req.side not in ("BUY", "SELL"):
+        errors.append("Side must be BUY or SELL.")
+    if not (req.condition_price is not None and req.condition_price > 0):
+        errors.append("A positive condition_price is required.")
+    if req.condition_is_above is None:
+        errors.append("condition_is_above must be explicitly true or false.")
+    if req.order_type not in ("MKT", "LMT"):
+        errors.append("Price-condition order_type must be MKT or LMT.")
+    elif req.order_type == "LMT" and not (req.limit_price is not None and req.limit_price > 0):
+        errors.append("LMT requires a positive limit_price.")
+    elif req.order_type == "MKT" and req.limit_price is not None:
+        errors.append("MKT price-condition orders must not have a limit_price.")
+
+    if req.lots:
+        errors.append("Price-condition orders must not have lots.")
+    if req.trail is not None:
+        errors.append("Price-condition orders must not have a trail.")
+    if req.stop_price is not None:
+        errors.append("Price-condition orders must not have a stop_price.")
+    if req.target_price is not None:
+        errors.append("Price-condition orders must not have a target_price.")
+    if req.good_till_date is not None:
+        errors.append("Price-condition orders must not have a good_till_date.")
+    if req.limit_offset is not None:
+        errors.append("Price-condition orders must not have a limit_offset.")
+    return errors
+
+
+def _price_condition_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    return [TwsOrderLegPreview(
+        role="price_condition",
+        side=req.side,
+        quantity=req.quantity,
+        order_type=req.order_type,
+        limit_price=req.limit_price if req.order_type == "LMT" else None,
+        tif="DAY",
+        condition_price=req.condition_price,
+        condition_is_above=req.condition_is_above,
+        transmit=True,
+    )]
+
+
 _VALIDATORS = {
     "scale_out_ladder": _validate_scale_out_ladder,
     "bracket": _validate_bracket,
@@ -361,6 +414,7 @@ _VALIDATORS = {
     "gtd": _validate_gtd,
     "moc": _validate_moc,
     "loc": _validate_loc,
+    "price_condition": _validate_price_condition,
 }
 
 
@@ -385,8 +439,10 @@ def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview
         legs = _gtd_leg(req)
     elif req.kind == "moc":
         legs = _moc_leg(req)
-    else:
+    elif req.kind == "loc":
         legs = _loc_leg(req)
+    else:
+        legs = _price_condition_leg(req)
 
     return TwsOrderPackagePreview(
         package_id=package_id,
@@ -409,8 +465,11 @@ _LOT_ROLE_PATTERN = re.compile(r"^lot(\d+)_(.+)$")
 _KNOWN_LOT_ROLE_SUFFIXES = frozenset({"entry", "target", "stop", "trail", "moc_fallback"})
 # Bracket legs have no lot concept (one parent, one target, one stop-or-trail child) —
 # a flat role name, not the lot{N}_<suffix> shape scale-out uses. Trailing stop, GTD,
-# MOC, and LOC are one-leg packages (no parent/child at all), each with its own flat role.
-_KNOWN_FLAT_ROLES = frozenset({"parent", "target", "stop", "trail", "trailing_stop", "gtd", "moc", "loc"})
+# MOC, LOC, and price_condition are one-leg packages (no parent/child at all), each
+# with its own flat role.
+_KNOWN_FLAT_ROLES = frozenset(
+    {"parent", "target", "stop", "trail", "trailing_stop", "gtd", "moc", "loc", "price_condition"}
+)
 
 
 def _parse_order_ref(order_ref: str) -> tuple[str, str] | None:

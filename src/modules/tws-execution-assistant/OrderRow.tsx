@@ -12,17 +12,19 @@ function UnmanagedBadge() {
   );
 }
 
-// Single-leg advanced orders (Task 5) have no parent/child structure to group
+// Single-leg advanced orders (Tasks 5-6) have no parent/child structure to group
 // like scale-out/bracket packages — just a badge so they're identifiable at a
-// glance. GTD in particular has no other visual signal: its order_type can be
-// LMT/STP/STP LMT/TRAIL/TRAILLMT, so a plain GTD LMT order would otherwise
-// look identical to a normal DAY-tif LMT order (OrderSnapshot has no tif field).
-const ADVANCED_ROLE_REF = /^ORBIT:TWS:[^:]+:(trailing_stop|gtd|moc|loc)$/;
+// glance. GTD and price-condition orders in particular have no other visual
+// signal: OrderSnapshot has no tif field, and no condition fields at all, so a
+// plain GTD or conditional LMT/MKT order would otherwise look identical to a
+// normal one.
+const ADVANCED_ROLE_REF = /^ORBIT:TWS:[^:]+:(trailing_stop|gtd|moc|loc|price_condition)$/;
 const ADVANCED_ROLE_LABEL: Record<string, string> = {
   trailing_stop: "TRAIL",
   gtd: "GTD",
   moc: "MOC",
   loc: "LOC",
+  price_condition: "COND",
 };
 
 function AdvancedOrderBadge({ orderRef }: { orderRef: string | null }) {

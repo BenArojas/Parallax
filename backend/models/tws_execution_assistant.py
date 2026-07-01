@@ -263,6 +263,8 @@ class TwsOrderLegPreview(BaseModel):
     parent_ref: str | None = None
     oca_group: str | None = None
     transmit: bool = False
+    condition_price: float | None = None
+    condition_is_above: bool | None = None
 
 
 class TwsOrderPackagePreview(BaseModel):

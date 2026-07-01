@@ -10,7 +10,7 @@ from datetime import date as date_, datetime, timezone
 
 from typing import TYPE_CHECKING
 
-from ib_async import IB, Contract, Order
+from ib_async import IB, Contract, Order, PriceCondition
 
 from models.broker_session import BrokerSessionMode
 from models.tws_order_capabilities import can_modify_order_type
@@ -602,6 +602,10 @@ class TwsBrokerAdapter:
                 if leg.oca_group is not None:
                     order.ocaGroup = leg.oca_group
                     order.ocaType = 1
+                if leg.condition_price is not None and leg.condition_is_above is not None:
+                    order.conditions = [PriceCondition(
+                        price=leg.condition_price, conId=preview.conid, exch="SMART", isMore=leg.condition_is_above,
+                    )]
                 if advanced_override:
                     order.advancedErrorOverride = ",".join(advanced_override)
 

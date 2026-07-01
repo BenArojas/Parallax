@@ -255,8 +255,8 @@ export interface TwsOverrideRequest {
 }
 
 // ── Advanced order packages (Mission 2) ──────────────────────────────────────
-// "scale_out_ladder" and "bracket" have cockpit UI; the remaining kinds are
-// reserved by the backend contract for later missions and have no UI yet.
+// All seven kinds have cockpit UI: scale_out_ladder and bracket each have their
+// own builder panel; trailing_stop/gtd/moc/loc/price_condition share AdvancedOrderPanel.
 export type TwsAdvancedOrderKind =
   | "scale_out_ladder"
   | "bracket"
@@ -311,6 +311,8 @@ export interface TwsOrderLegPreview {
   parent_ref: string | null;
   oca_group: string | null;
   transmit: boolean;
+  condition_price: number | null;
+  condition_is_above: boolean | null;
 }
 
 export interface TwsOrderPackagePreview {

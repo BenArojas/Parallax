@@ -554,33 +554,86 @@ git add backend/services/tws_order_packages.py backend/tests/test_execution_assi
 git commit -m "feat: add tws trailing and close order packages"
 ```
 
-### Task 6: Add One Price Condition Slice
+### Task 6: Add One Price Condition Slice — DONE (2026-07-01)
+
+**Reframed like Tasks 4-5 — vertical slice, not backend-only.** Shipped
+alongside a minimal cockpit path inside the existing `AdvancedOrderPanel`
+("Price Condition" as a 5th kind selector option) and Open Orders
+identification, per direct user instruction. Smallest useful conditional
+order: one normal MKT/LMT order with one IBKR `PriceCondition` attached —
+no AND/OR groups, no volume/time/percent-change conditions, no
+bracket-with-condition or scale-out-with-condition, no autonomous market
+watching beyond TWS's own native condition check.
 
 **Files:**
-- Modify: `backend/services/tws_order_packages.py`
-- Modify: `backend/services/tws_broker_adapter.py`
+- Modify: `backend/models/tws_execution_assistant.py` (`TwsOrderLegPreview`
+  gains `condition_price: float | None` / `condition_is_above: bool | None`
+  — the plain-data fields the preview leg needed to carry the condition
+  through to the adapter; no other model changes, `TwsOrderPackageRequest`
+  already had `condition_price`/`condition_is_above` from earlier work)
+- Modify: `backend/services/tws_order_packages.py` (`_validate_price_condition`,
+  `_price_condition_leg`, registered in `_VALIDATORS` and the leg-building
+  dispatch, `price_condition` added to `_KNOWN_FLAT_ROLES`)
+- Modify: `backend/services/tws_broker_adapter.py` (import `PriceCondition`
+  from `ib_async`; attach `order.conditions = [PriceCondition(...)]` when a
+  leg carries condition fields — the only adapter branch added, no broader
+  condition-builder machinery)
 - Test: `backend/tests/test_execution_assistant_advanced_orders.py`
+- Modify: `src/modules/tws-execution-assistant/api.ts` (`TwsOrderLegPreview`
+  gains the matching two fields; also fixed a stale comment that still said
+  only scale-out/bracket had cockpit UI, left over from Task 5)
+- Modify: `src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx` (5th
+  kind: symbol search + side + quantity shared fields, condition
+  direction/price, order type MKT/LMT with limit price for LMT, a plain-English
+  preview summary line — e.g. "Wait for INTC above $120.00, then submit BUY
+  20 MKT.")
+- Modify: `src/modules/tws-execution-assistant/OrderRow.tsx` (extended the
+  existing Task 5 advanced-role badge regex/label map to include
+  `price_condition` — `OrderSnapshot` has no condition fields at all, so a
+  conditional MKT/LMT order would otherwise look identical to a plain one)
 
 **Interfaces:**
-- Extends `kind="price_condition"` with `condition_price` and `condition_is_above`.
+- Extends `kind="price_condition"` with `condition_price` and
+  `condition_is_above` (already on `TwsOrderPackageRequest`).
 
-- [ ] Validate a single price condition only: positive `condition_price`, boolean `condition_is_above`, and stock `conid`.
-- [ ] In the adapter, create `PriceCondition(price=req.condition_price, conId=req.conid, exch="SMART", isMore=req.condition_is_above)`.
-- [ ] Attach it to the one broker order in `order.conditions`.
-- [ ] Keep broad condition builders out of scope.
-- [ ] Add one focused preview test for price condition fields.
-- [ ] Run:
+- [x] Validate a single price condition only: positive `condition_price`,
+  boolean `condition_is_above` (explicitly, not just "truthy" — `False` is a
+  valid value), positive `conid`, non-empty `symbol`, positive `quantity`,
+  `side` BUY/SELL, `order_type` MKT or LMT with a positive `limit_price`
+  required for LMT and rejected for MKT. Also rejects any field from another
+  kind (`lots`, `trail`, `stop_price`, `target_price`, `good_till_date`,
+  `limit_offset`) being set alongside it — applying the same "reject
+  extraneous fields" discipline the Task 5 GTD review fix established,
+  proactively this time rather than needing a second review pass.
+- [x] In the adapter, create `PriceCondition(price=leg.condition_price,
+  conId=preview.conid, exch="SMART", isMore=leg.condition_is_above)` and
+  attach it to `order.conditions`.
+- [x] Kept broad condition builders out of scope — one condition, no
+  conjunctions, no other condition types.
+- [x] Two focused tests: one preview test (one leg, condition fields set,
+  `transmit=True`) and one adapter-level test (using the existing fake-IB
+  test pattern) proving the placed `ib_async.Order` carries exactly one
+  `PriceCondition` with the right `conId`/`exch`/`isMore`/`price`.
+- [x] Run:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py -q
+npm run typecheck
+git diff --check
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
-git add backend/services/tws_order_packages.py backend/services/tws_broker_adapter.py backend/tests/test_execution_assistant_advanced_orders.py
+git add backend/models/tws_execution_assistant.py backend/services/tws_order_packages.py backend/services/tws_broker_adapter.py backend/tests/test_execution_assistant_advanced_orders.py src/modules/tws-execution-assistant/api.ts src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx src/modules/tws-execution-assistant/OrderRow.tsx docs/superpowers/plans/2026-07-01-tws-advanced-order-types.md
 git commit -m "feat: add tws price condition package"
 ```
+
+**Manual smoke: not yet run** — same sandbox limitation as Tasks 4/5 (no
+working browser preview here). Still needs a human pass on: preview BUY MKT
+above, preview SELL LMT below, and that the Advanced panel with 5 kind
+buttons ("Trailing Stop"/"Good-Till-Date"/"Market-on-Close"/"Limit-on-Close"/
+"Price Condition") stays readable rather than cramped.
 
 ### Task 7: Cockpit Package Review UI
 

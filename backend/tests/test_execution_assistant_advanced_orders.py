@@ -316,3 +316,81 @@ def test_gtd_trail_rejects_stray_stop_price():
     assert r.status_code == 422
     assert r.json()["detail"]["error"] == "invalid_order_package"
     assert any("must not have a stop_price" in e for e in r.json()["detail"]["errors"])
+
+
+# ── Task 6: One Price-Condition Slice ────────────────────────────────────────
+
+def _price_condition_request(**overrides) -> dict:
+    base = {
+        "kind": "price_condition",
+        "conid": 270639,
+        "symbol": "INTC",
+        "side": "BUY",
+        "quantity": 20,
+        "order_type": "MKT",
+        "condition_price": 120,
+        "condition_is_above": True,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_price_condition_preview_has_one_leg_with_condition_fields_and_transmit():
+    client = _client()
+    req = _price_condition_request()
+
+    r = client.post("/execution-assistant/order-packages/preview", json=req)
+
+    assert r.status_code == 200
+    legs = r.json()["legs"]
+    assert len(legs) == 1  # a plain order with one trigger attached, not a package of legs
+    leg = legs[0]
+    assert leg["role"] == "price_condition"
+    assert leg["condition_price"] == 120
+    assert leg["condition_is_above"] is True
+    assert leg["parent_ref"] is None
+    assert leg["transmit"] is True
+
+
+def test_place_order_package_attaches_one_price_condition_to_the_broker_order():
+    """Adapter-level regression test: the placed ib_async Order must carry exactly
+    one PriceCondition with the request's conid, SMART exchange, isMore, and price —
+    not a broad condition builder, just this one minimal attachment."""
+    req = TwsOrderPackageRequest(**_price_condition_request(side="SELL", condition_is_above=False, condition_price=115))
+    preview = preview_order_package(req)
+
+    adapter = TwsBrokerAdapter()
+    adapter._state = "connected"
+    adapter._connected_port = 4002  # paper port
+
+    placed = []
+
+    class _FakeTrade:
+        def __init__(self, order):
+            self.order = order
+            self.orderStatus = SimpleNamespace(status="PreSubmitted")
+
+    class _FakeEvent:
+        def __iadd__(self, fn):
+            return self
+
+        def __isub__(self, fn):
+            return self
+
+    fake_ib = MagicMock()
+    fake_ib.isConnected.return_value = True
+    fake_ib.client.getReqId.side_effect = iter(range(1, 100))
+    fake_ib.errorEvent = _FakeEvent()
+    fake_ib.placeOrder.side_effect = lambda contract, order: placed.append(order) or _FakeTrade(order)
+    adapter._ib = fake_ib
+
+    asyncio.run(adapter.place_order_package(preview, mode="paper"))
+
+    assert len(placed) == 1
+    order = placed[0]
+    assert len(order.conditions) == 1
+    condition = order.conditions[0]
+    assert condition.conId == req.conid
+    assert condition.exch == "SMART"
+    assert condition.isMore is False
+    assert condition.price == 115
