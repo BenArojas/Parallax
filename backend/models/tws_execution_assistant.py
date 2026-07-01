@@ -122,6 +122,7 @@ MarketDataType = Literal[
     "frozen",
     "delayed",
     "delayed_frozen",
+    "partial",
     "unavailable",
 ]
 

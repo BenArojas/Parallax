@@ -22,6 +22,7 @@ from models.tws_execution_assistant import (
     BarSnapshot,
     BarsResponse,
     InstrumentResult,
+    MarketDataType,
     OrderSnapshot,
     PAPER_PORTS,
     PaperOrderSubmission,
@@ -186,6 +187,22 @@ class TwsBrokerAdapter:
             # as a dropped connection visible on the next status poll.
             log.warning("TWS connect failed (%s:%s cid=%s): %s", host, port, client_id, exc)
             self._state = "error"
+
+    def _classify_entitlement(
+        self, market_data_type_code: int | None, error_code: int | None,
+    ) -> tuple[MarketDataType, str | None]:
+        """Map IBKR market-data signals to Orbit entitlement state."""
+        if error_code == 10089:
+            return (
+                "unavailable",
+                "API market data subscription required; delayed market data may be available.",
+            )
+        if error_code == 10090:
+            return (
+                "partial",
+                "Partial market data subscription — some fields may be missing.",
+            )
+        return _MDT_MAP.get(market_data_type_code or 0, "unknown"), None
 
     async def disconnect(self) -> None:
         if self._state == "not_initialized":
@@ -380,12 +397,17 @@ class TwsBrokerAdapter:
                     is_delayed=mdt in ("delayed", "delayed_frozen"),
                 )
 
-            if 10089 in captured_errors:
+            error_code = next((code for code in captured_errors if code in _EXPECTED_MDT_ERRORS), None)
+            market_data_type, unavailable_reason = self._classify_entitlement(
+                getattr(t, "marketDataType", None),
+                error_code,
+            )
+            if error_code is not None:
                 return QuoteSnapshot(
-                    market_data_type="unavailable",
+                    market_data_type=market_data_type,
                     is_delayed=False,
-                    error_code=10089,
-                    unavailable_reason="API market data subscription required; delayed market data may be available.",
+                    error_code=error_code,
+                    unavailable_reason=unavailable_reason,
                 )
 
             return QuoteSnapshot(

@@ -192,6 +192,7 @@ export type MarketDataType =
   | "frozen"
   | "delayed"
   | "delayed_frozen"
+  | "partial"
   | "unavailable";
 
 export interface QuoteSnapshot {
