@@ -12,6 +12,29 @@ function UnmanagedBadge() {
   );
 }
 
+// Single-leg advanced orders (Task 5) have no parent/child structure to group
+// like scale-out/bracket packages — just a badge so they're identifiable at a
+// glance. GTD in particular has no other visual signal: its order_type can be
+// LMT/STP/STP LMT/TRAIL/TRAILLMT, so a plain GTD LMT order would otherwise
+// look identical to a normal DAY-tif LMT order (OrderSnapshot has no tif field).
+const ADVANCED_ROLE_REF = /^ORBIT:TWS:[^:]+:(trailing_stop|gtd|moc|loc)$/;
+const ADVANCED_ROLE_LABEL: Record<string, string> = {
+  trailing_stop: "TRAIL",
+  gtd: "GTD",
+  moc: "MOC",
+  loc: "LOC",
+};
+
+function AdvancedOrderBadge({ orderRef }: { orderRef: string | null }) {
+  const match = orderRef ? ADVANCED_ROLE_REF.exec(orderRef) : null;
+  if (!match) return null;
+  return (
+    <span className="rounded bg-[var(--glow-blue)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--clr-blue)]">
+      {ADVANCED_ROLE_LABEL[match[1]]}
+    </span>
+  );
+}
+
 export function OrderRow({
   order,
   warnings,
@@ -37,6 +60,7 @@ export function OrderRow({
       <td className="py-1.5 pr-3 font-medium">
         <span className="inline-flex items-center gap-1.5">
           {order.symbol}
+          <AdvancedOrderBadge orderRef={order.order_ref} />
           {rowWarnings.length > 0 && (
             <Tooltip>
               <TooltipTrigger

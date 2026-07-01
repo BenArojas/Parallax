@@ -26,6 +26,16 @@ class TwsOrderPackageValidationError(Exception):
         self.errors = errors
 
 
+def _validate_trail_value(prefix: str, trail: TwsTrailSpec) -> list[str]:
+    """Shared by every trail context: scale-out lots, brackets, and standalone trailing stops."""
+    errors: list[str] = []
+    if trail.mode == "percent" and not (0 < trail.value < 100):
+        errors.append(f"{prefix} percent trail must be greater than 0 and less than 100.")
+    if trail.mode == "amount" and trail.value <= 0:
+        errors.append(f"{prefix} fixed trail value must be positive.")
+    return errors
+
+
 def _validate_stop_style(prefix: str, stop_price: float | None, trail: TwsTrailSpec | None) -> list[str]:
     """Shared by scale-out lots and brackets: exactly one of a fixed stop or a trail."""
     errors: list[str] = []
@@ -36,10 +46,7 @@ def _validate_stop_style(prefix: str, stop_price: float | None, trail: TwsTrailS
     elif not has_stop and not has_trail:
         errors.append(f"{prefix} requires exactly one stop style: stop_price or trail.")
     elif has_trail and trail is not None:
-        if trail.mode == "percent" and not (0 < trail.value < 100):
-            errors.append(f"{prefix} percent trail must be greater than 0 and less than 100.")
-        if trail.mode == "amount" and trail.value <= 0:
-            errors.append(f"{prefix} fixed trail value must be positive.")
+        errors.extend(_validate_trail_value(prefix, trail))
     return errors
 
 
@@ -215,20 +222,152 @@ def _bracket_legs(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
     return legs
 
 
+def _validate_trailing_stop(req: TwsOrderPackageRequest) -> list[str]:
+    errors: list[str] = []
+    if req.quantity <= 0:
+        errors.append("Quantity must be positive.")
+    if req.side not in ("BUY", "SELL"):
+        errors.append("Side must be BUY or SELL.")
+    if req.order_type not in ("TRAIL", "TRAILLMT"):
+        errors.append("Trailing stop order_type must be TRAIL or TRAILLMT.")
+    if req.trail is None:
+        errors.append("A trail spec is required.")
+    else:
+        errors.extend(_validate_trail_value("Trailing stop", req.trail))
+    if req.order_type == "TRAILLMT" and not (req.limit_offset is not None and req.limit_offset > 0):
+        errors.append("TRAILLMT requires a positive limit_offset.")
+    return errors
+
+
+def _trailing_stop_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    return [TwsOrderLegPreview(
+        role="trailing_stop",
+        side=req.side,
+        quantity=req.quantity,
+        order_type=req.order_type,
+        trail=req.trail,
+        limit_offset=req.limit_offset if req.order_type == "TRAILLMT" else None,
+        transmit=True,
+    )]
+
+
+# Working order types TWS can hold open until good_till_date — MKT fills immediately
+# and can't meaningfully be "good till" anything, so it's excluded on purpose.
+_GTD_WORKING_ORDER_TYPES = frozenset({"LMT", "STP", "STP LMT", "TRAIL", "TRAILLMT"})
+
+
+def _validate_gtd(req: TwsOrderPackageRequest) -> list[str]:
+    errors: list[str] = []
+    if req.quantity <= 0:
+        errors.append("Quantity must be positive.")
+    if req.side not in ("BUY", "SELL"):
+        errors.append("Side must be BUY or SELL.")
+    if not req.good_till_date:
+        errors.append("good_till_date is required for a GTD order.")
+    if req.order_type not in _GTD_WORKING_ORDER_TYPES:
+        errors.append(f"GTD order_type must be one of {sorted(_GTD_WORKING_ORDER_TYPES)}.")
+        return errors  # remaining checks assume a recognized order_type
+
+    if req.order_type == "LMT" and not (req.limit_price is not None and req.limit_price > 0):
+        errors.append("LMT GTD requires a positive limit_price.")
+    if req.order_type == "STP" and not (req.stop_price is not None and req.stop_price > 0):
+        errors.append("STP GTD requires a positive stop_price.")
+    if req.order_type == "STP LMT" and not (
+        req.limit_price is not None and req.limit_price > 0 and req.stop_price is not None and req.stop_price > 0
+    ):
+        errors.append("STP LMT GTD requires both a positive limit_price and stop_price.")
+    if req.order_type in ("TRAIL", "TRAILLMT"):
+        if req.trail is None:
+            errors.append("A trail spec is required for a trailing GTD order.")
+        else:
+            errors.extend(_validate_trail_value("GTD trailing", req.trail))
+        if req.order_type == "TRAILLMT" and not (req.limit_offset is not None and req.limit_offset > 0):
+            errors.append("TRAILLMT GTD requires a positive limit_offset.")
+    return errors
+
+
+def _gtd_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    return [TwsOrderLegPreview(
+        role="gtd",
+        side=req.side,
+        quantity=req.quantity,
+        order_type=req.order_type,
+        limit_price=req.limit_price,
+        stop_price=req.stop_price,
+        trail=req.trail,
+        limit_offset=req.limit_offset if req.order_type == "TRAILLMT" else None,
+        tif="GTD",
+        good_till_date=req.good_till_date,
+        transmit=True,
+    )]
+
+
+def _validate_moc(req: TwsOrderPackageRequest) -> list[str]:
+    errors: list[str] = []
+    if req.quantity <= 0:
+        errors.append("Quantity must be positive.")
+    if req.side not in ("BUY", "SELL"):
+        errors.append("Side must be BUY or SELL.")
+    if req.limit_price is not None:
+        errors.append("MOC orders must not have a limit_price.")
+    return errors
+
+
+def _moc_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    return [TwsOrderLegPreview(role="moc", side=req.side, quantity=req.quantity, order_type="MOC", transmit=True)]
+
+
+def _validate_loc(req: TwsOrderPackageRequest) -> list[str]:
+    errors: list[str] = []
+    if req.quantity <= 0:
+        errors.append("Quantity must be positive.")
+    if req.side not in ("BUY", "SELL"):
+        errors.append("Side must be BUY or SELL.")
+    if not (req.limit_price is not None and req.limit_price > 0):
+        errors.append("LOC requires a positive limit_price.")
+    return errors
+
+
+def _loc_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    return [TwsOrderLegPreview(
+        role="loc", side=req.side, quantity=req.quantity, order_type="LOC", limit_price=req.limit_price, transmit=True,
+    )]
+
+
+_VALIDATORS = {
+    "scale_out_ladder": _validate_scale_out_ladder,
+    "bracket": _validate_bracket,
+    "trailing_stop": _validate_trailing_stop,
+    "gtd": _validate_gtd,
+    "moc": _validate_moc,
+    "loc": _validate_loc,
+}
+
+
 def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview:
     """Validate a package request and return the exact plain-data order graph."""
-    if req.kind == "scale_out_ladder":
-        errors = _validate_scale_out_ladder(req)
-    elif req.kind == "bracket":
-        errors = _validate_bracket(req)
-    else:
+    validator = _VALIDATORS.get(req.kind)
+    if validator is None:
         raise TwsOrderPackageValidationError([f"Unsupported package kind: {req.kind}"])
 
+    errors = validator(req)
     if errors:
         raise TwsOrderPackageValidationError(errors)
 
     package_id = str(uuid.uuid4())
-    legs = _scale_out_ladder_legs(req, package_id) if req.kind == "scale_out_ladder" else _bracket_legs(req)
+    if req.kind == "scale_out_ladder":
+        legs = _scale_out_ladder_legs(req, package_id)
+    elif req.kind == "bracket":
+        legs = _bracket_legs(req)
+    elif req.kind == "trailing_stop":
+        legs = _trailing_stop_leg(req)
+    elif req.kind == "gtd":
+        legs = _gtd_leg(req)
+    elif req.kind == "moc":
+        legs = _moc_leg(req)
+    else:
+        legs = _loc_leg(req)
+
     return TwsOrderPackagePreview(
         package_id=package_id,
         kind=req.kind,
@@ -249,8 +388,9 @@ _ORDER_REF_PATTERN = re.compile(r"^ORBIT:TWS:([^:]+):([^:]+)$")
 _LOT_ROLE_PATTERN = re.compile(r"^lot(\d+)_(.+)$")
 _KNOWN_LOT_ROLE_SUFFIXES = frozenset({"entry", "target", "stop", "trail", "moc_fallback"})
 # Bracket legs have no lot concept (one parent, one target, one stop-or-trail child) —
-# a flat role name, not the lot{N}_<suffix> shape scale-out uses.
-_KNOWN_FLAT_ROLES = frozenset({"parent", "target", "stop", "trail"})
+# a flat role name, not the lot{N}_<suffix> shape scale-out uses. Trailing stop, GTD,
+# MOC, and LOC are one-leg packages (no parent/child at all), each with its own flat role.
+_KNOWN_FLAT_ROLES = frozenset({"parent", "target", "stop", "trail", "trailing_stop", "gtd", "moc", "loc"})
 
 
 def _parse_order_ref(order_ref: str) -> tuple[str, str] | None:

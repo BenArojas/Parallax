@@ -450,32 +450,85 @@ git commit -m "feat: add tws bracket packages"
 
 ### Task 5: Add Trailing, Good-Till-Date, Market-On-Close, And Limit-On-Close
 
+**Reframed 2026-07-01 — vertical slice, like Task 4.** Backend-only as
+originally scoped; shipped alongside a minimal cockpit path (one "Advanced"
+`PlanMode` toggle segment, blue accent, kind selector inside the panel for
+Trailing/GTD/MOC/LOC — a 5th separate toggle segment per kind would have
+crowded the header) and Open Orders identification. Added to the File Map:
+`src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx` (new),
+`src/modules/tws-execution-assistant/OrderRow.tsx` (advanced-role badge).
+
 **Files:**
 - Modify: `backend/services/tws_order_packages.py`
-- Modify: `backend/services/tws_broker_adapter.py`
+- `backend/services/tws_broker_adapter.py`: **no change needed** — leg
+  construction was already fully generic (percent trail → `trailingPercent`,
+  fixed trail → `auxPrice`, `limit_offset` → `lmtPriceOffset`,
+  `good_till_date` → `goodTillDate`, `tif` from the leg — all pre-existing
+  pass-through code from the scale-out/bracket work).
 - Test: `backend/tests/test_execution_assistant_advanced_orders.py`
+- Create: `src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx`
+- Modify: `src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx`
+  (4th `PlanMode` toggle segment, blue `Panel` accent)
+- Modify: `src/modules/tws-execution-assistant/OrderRow.tsx` (advanced-role
+  badge — extracted to its own file during Task 4's bracket-manage-package
+  follow-up, so this is the one place standalone-row rendering lives)
 
 **Interfaces:**
-- Extends package kinds: `trailing_stop`, `gtd`, `moc`, `loc`.
+- Extends package kinds: `trailing_stop`, `gtd`, `moc`, `loc`. All four reuse
+  existing `TwsOrderPackageRequest` fields — no model changes needed.
 
-- [ ] Add trailing validation:
+- [x] Add trailing validation:
   - fixed amount trail requires positive value.
   - percent trail requires value greater than `0` and less than `100`.
   - `TRAILLMT` requires positive `limit_offset`.
-- [ ] Map fixed trail to `Order.auxPrice`, percent trail to `Order.trailingPercent`, and trailing-stop-limit offset to `Order.lmtPriceOffset`.
-- [ ] Add good-till-date validation: `good_till_date` is required when `kind="gtd"`.
-- [ ] Add close order validation: `MOC` has no limit price; `LOC` requires positive `limit_price`.
-- [ ] Add one focused test covering percent trailing preview and one focused test covering `LOC` rejects missing limit price.
-- [ ] Run:
+  - (`_validate_trail_value` extracted as a shared helper, now used by
+    scale-out lots, brackets, and standalone trailing stops/GTD-trailing.)
+- [x] Map fixed trail to `Order.auxPrice`, percent trail to
+  `Order.trailingPercent`, and trailing-stop-limit offset to
+  `Order.lmtPriceOffset` — **already covered** by the existing generic
+  adapter mapping; verified by reading `place_order_package`, not patched.
+- [x] Add good-till-date validation: `good_till_date` required for
+  `kind="gtd"`; restricted to working order types (`LMT`, `STP`, `STP LMT`,
+  `TRAIL`, `TRAILLMT`) — `MKT` excluded since a market order fills
+  immediately and can't meaningfully be "good till" anything.
+- [x] Add close order validation: `MOC` has no limit price; `LOC` requires
+  positive `limit_price`.
+- [x] Each of the four is a one-leg package (`role="trailing_stop"` /
+  `"gtd"` / `"moc"` / `"loc"`), not a parent/child package — added to
+  `_KNOWN_FLAT_ROLES` so they don't spuriously trigger the Task 3
+  reconciliation `unknown_role` warning.
+- [x] Two focused tests (the plan's normal 1-test budget, extended to 2
+  since success and fail-safe protect distinct promises per
+  `docs/testing.md`): `test_trailing_stop_percent_preview_has_one_leg_with_final_transmit`
+  and `test_loc_preview_rejects_missing_limit_price`.
+- [x] Frontend: `AdvancedOrderPanel.tsx` — symbol search (same pattern as
+  Task 1/4), side/quantity, a compact in-panel kind selector (not a 4th+5th
+  header toggle — kept the header to one "Advanced" segment per this task's
+  own vertical-slice framing note), fields that change by kind, a preview
+  leg table (adds a TIF column so GTD's `tif`/`good_till_date` are visible,
+  unlike the bracket/scale-out tables which don't need one), paper/live
+  submit via the existing package endpoints and live gate.
+- [x] Open Orders identification: since `OrderSnapshot` has no `tif` field,
+  a GTD order's `order_type` alone (which can be `LMT`/`STP`/`STP LMT`/
+  `TRAIL`/`TRAILLMT`) wouldn't otherwise look any different from a normal
+  DAY-tif order of the same type. Added a small blue role badge
+  (`OrderRow.tsx`, matches on `order_ref` ending in `:trailing_stop`/`:gtd`/
+  `:moc`/`:loc`) so these are identifiable regardless of order_type. Cancel
+  stays available for all of them; Modify already correctly shows "—" for
+  `TRAIL`/`TRAILLMT`/`MOC`/`LOC` via the pre-existing
+  `canModifyOrderType`/`TWS_ORDER_CAPABILITIES` allowlist (unchanged —
+  those order types were never in it, so no regression, no new gap).
+- [x] Run:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py -q
+npm run typecheck
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
-git add backend/services/tws_order_packages.py backend/services/tws_broker_adapter.py backend/tests/test_execution_assistant_advanced_orders.py
+git add backend/services/tws_order_packages.py backend/tests/test_execution_assistant_advanced_orders.py src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx src/modules/tws-execution-assistant/OrderRow.tsx docs/superpowers/plans/2026-07-01-tws-advanced-order-types.md
 git commit -m "feat: add tws trailing and close order packages"
 ```
 

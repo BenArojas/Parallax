@@ -243,3 +243,49 @@ def test_bracket_preview_has_parent_target_stop_and_final_transmit():
     assert by_role["stop"]["parent_ref"] == "parent"
     assert by_role["stop"]["side"] == "SELL"
     assert by_role["stop"]["transmit"] is True  # only the final child transmits
+
+
+# ── Task 5: Trailing Stop, GTD, MOC, LOC ──────────────────────────────────────
+
+def test_trailing_stop_percent_preview_has_one_leg_with_final_transmit():
+    client = _client()
+    req = {
+        "kind": "trailing_stop",
+        "conid": 270639,
+        "symbol": "INTC",
+        "side": "SELL",
+        "quantity": 50,
+        "order_type": "TRAIL",
+        "trail": {"mode": "percent", "value": 5},
+    }
+
+    r = client.post("/execution-assistant/order-packages/preview", json=req)
+
+    assert r.status_code == 200
+    legs = r.json()["legs"]
+    assert len(legs) == 1  # a standalone order, not a parent/child package
+    leg = legs[0]
+    assert leg["role"] == "trailing_stop"
+    assert leg["order_type"] == "TRAIL"
+    assert leg["trail"] == {"mode": "percent", "value": 5}
+    assert leg["parent_ref"] is None
+    assert leg["transmit"] is True
+
+
+def test_loc_preview_rejects_missing_limit_price():
+    client = _client()
+    req = {
+        "kind": "loc",
+        "conid": 270639,
+        "symbol": "INTC",
+        "side": "SELL",
+        "quantity": 50,
+        "order_type": "MKT",
+        "limit_price": None,
+    }
+
+    r = client.post("/execution-assistant/order-packages/preview", json=req)
+
+    assert r.status_code == 422
+    assert r.json()["detail"]["error"] == "invalid_order_package"
+    assert any("positive limit_price" in e for e in r.json()["detail"]["errors"])
