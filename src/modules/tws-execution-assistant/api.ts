@@ -249,6 +249,21 @@ export interface TwsBarUpdateEvent {
   bar: BarSnapshot;
 }
 
+export interface TwsDepthLevel {
+  price: number;
+  size: number;
+  market_maker: string | null;
+}
+
+export interface TwsDepthUpdateEvent {
+  type: "tws_depth_update";
+  conid: number;
+  bids: TwsDepthLevel[];
+  asks: TwsDepthLevel[];
+  entitlement: MarketDataType;
+  unavailable_reason: string | null;
+}
+
 export interface TwsOrderActionResult {
   order_id: number;
   status: string;

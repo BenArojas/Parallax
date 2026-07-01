@@ -17,8 +17,10 @@ import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
+import { DepthPanel } from "./DepthPanel";
 import { useTwsLiveQuote } from "./useTwsLiveQuote";
 import { useTwsLiveBars } from "./useTwsLiveBars";
+import { useTwsLiveDepth } from "./useTwsLiveDepth";
 import { useTwsLiveStream } from "./useTwsLiveStream";
 
 const STATUS_KEY = ["tws-status"];
@@ -632,6 +634,7 @@ export function TwsExecutionAssistantModule() {
     staleTime: 60_000,
   });
   const liveBar = useTwsLiveBars(planForm.conid, activeTimeframe);
+  const depth = useTwsLiveDepth(planForm.conid);
 
   /** Single entry point for "Modify" anywhere in Open Orders (standalone rows
    * or from inside a package manager panel). Clears every other transient
@@ -1599,9 +1602,9 @@ export function TwsExecutionAssistantModule() {
                 </div>
               </div>
               {planForm.conid > 0 && connected && (
-            <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
+                <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
               )}
-              <div className="flex flex-1 p-3">
+              <div className="flex flex-1 gap-2 p-3">
                 <div className="flex flex-1 overflow-hidden rounded border border-border/60 bg-[var(--bg-0)]">
                   {barsLoading ? (
                     <div className="flex h-full w-full items-center justify-center text-[11px] text-[var(--text-3)] animate-pulse">
@@ -1620,6 +1623,11 @@ export function TwsExecutionAssistantModule() {
                     </div>
                   )}
                 </div>
+                {planForm.conid > 0 && connected && (
+                  <div className="w-36 shrink-0 overflow-hidden rounded border border-border/60 bg-[var(--bg-0)] p-2">
+                    <DepthPanel depth={depth} />
+                  </div>
+                )}
               </div>
             </section>
           </aside>

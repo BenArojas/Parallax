@@ -230,6 +230,21 @@ class TwsBarUpdateEvent(BaseModel):
     bar: BarSnapshot
 
 
+class TwsDepthLevel(BaseModel):
+    price: float
+    size: float
+    market_maker: str | None = None
+
+
+class TwsDepthUpdateEvent(BaseModel):
+    type: Literal["tws_depth_update"] = "tws_depth_update"
+    conid: int
+    bids: list[TwsDepthLevel] = []
+    asks: list[TwsDepthLevel] = []
+    entitlement: MarketDataType = "unknown"
+    unavailable_reason: str | None = None
+
+
 class TwsOrderActionResult(BaseModel):
     order_id: int
     status: str

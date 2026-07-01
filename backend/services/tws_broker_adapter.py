@@ -35,6 +35,8 @@ from models.tws_execution_assistant import (
     TwsAdapterState,
     TwsAdvancedReject,
     TwsBarUpdateEvent,
+    TwsDepthLevel,
+    TwsDepthUpdateEvent,
     TwsModifyOrderRequest,
     TwsOrderActionResult,
     TwsOrderPackageLegSubmission,
@@ -175,6 +177,7 @@ class TwsBrokerAdapter:
         self._stream_subscriptions: dict[WebSocket, dict[int, set[str]]] = {}
         self._quote_streams: dict[int, dict[str, object]] = {}
         self._bar_streams: dict[tuple[int, str], dict[str, object]] = {}
+        self._depth_streams: dict[int, dict[str, object]] = {}
 
         async def _on_connected(*_args: object) -> None:
             await self._broadcast_stream_status(True)
@@ -284,6 +287,8 @@ class TwsBrokerAdapter:
             await self.subscribe_quote(websocket, req.conid)
         elif req.channel == "bars":
             await self.subscribe_bars(websocket, req.conid, req.timeframe or "5m")
+        elif req.channel == "depth":
+            await self.subscribe_depth(websocket, req.conid)
 
     async def stream_unsubscribe(self, websocket: WebSocket, req: TwsStreamSubscribeRequest) -> None:
         channel_key = self._stream_channel_key(req)
@@ -292,6 +297,9 @@ class TwsBrokerAdapter:
             return
         if req.channel == "bars":
             self.unsubscribe_bars(websocket, req.conid, req.timeframe or "5m")
+            return
+        if req.channel == "depth":
+            self.unsubscribe_depth(websocket, req.conid)
             return
         self._remove_stream_ownership(websocket, req.conid, channel_key)
 
@@ -303,6 +311,8 @@ class TwsBrokerAdapter:
                     self.unsubscribe_quote(websocket, conid)
                 elif channel_key.startswith("bars:"):
                     self.unsubscribe_bars(websocket, conid, channel_key.split(":", 1)[1])
+                elif channel_key == "depth":
+                    self.unsubscribe_depth(websocket, conid)
                 else:
                     self._remove_stream_ownership(websocket, conid, channel_key)
         self._stream_subscriptions.pop(websocket, None)
@@ -313,6 +323,9 @@ class TwsBrokerAdapter:
             self._ib.errorEvent -= state["error_handler"]
         for state in self._bar_streams.values():
             state["bar_data_list"].updateEvent -= state["update_handler"]
+        for state in self._depth_streams.values():
+            state["ticker"].updateEvent -= state["update_handler"]
+            self._ib.errorEvent -= state["error_handler"]
         self._stream_subscriptions = {
             websocket: {}
             for websocket in list(self._stream_subscriptions)
@@ -320,6 +333,7 @@ class TwsBrokerAdapter:
         }
         self._quote_streams = {}
         self._bar_streams = {}
+        self._depth_streams = {}
 
     def _remove_stream_ownership(self, websocket: WebSocket, conid: int, channel_key: str) -> None:
         conids = self._stream_subscriptions.setdefault(websocket, {})
@@ -530,6 +544,95 @@ class TwsBrokerAdapter:
         bar_data_list = state["bar_data_list"]
         bar_data_list.updateEvent -= state["update_handler"]
         self._ib.cancelHistoricalData(bar_data_list)
+
+    def _depth_event_payload(
+        self, conid: int, ticker: object, error_msg: str | None,
+    ) -> TwsDepthUpdateEvent:
+        if error_msg is not None:
+            return TwsDepthUpdateEvent(
+                conid=conid, bids=[], asks=[],
+                entitlement="unavailable", unavailable_reason=error_msg,
+            )
+        bids = [
+            TwsDepthLevel(price=level.price, size=level.size, market_maker=level.marketMaker or None)
+            for level in getattr(ticker, "domBids", [])
+        ]
+        asks = [
+            TwsDepthLevel(price=level.price, size=level.size, market_maker=level.marketMaker or None)
+            for level in getattr(ticker, "domAsks", [])
+        ]
+        return TwsDepthUpdateEvent(conid=conid, bids=bids, asks=asks, entitlement="live")
+
+    async def _broadcast_depth_event(self, conid: int) -> None:
+        state = self._depth_streams.get(conid)
+        if not state:
+            return
+        event = self._depth_event_payload(conid, state["ticker"], state["error_msg"]).model_dump()
+        dead: list[WebSocket] = []
+        for websocket, conids in list(self._stream_subscriptions.items()):
+            if "depth" not in conids.get(conid, set()):
+                continue
+            if not self.stream_socket_is_open(websocket):
+                dead.append(websocket)
+                continue
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                dead.append(websocket)
+        for websocket in dead:
+            self.stream_cleanup(websocket)
+
+    async def subscribe_depth(self, websocket: WebSocket, conid: int) -> None:
+        if conid in self._depth_streams:
+            return
+
+        contract = Contract(conId=conid, exchange="SMART", currency="USD", secType="STK")
+        ticker = self._ib.reqMktDepth(contract, numRows=5)
+
+        def _on_error(_req_id: int, code: int, msg: str, contract_arg: object) -> None:
+            # Depth failures never surface via marketDataType/10089/10090 — reqMktDepth
+            # never raises and an unentitled sub just stays silently empty. The real
+            # error (309/2152/10092/etc.) only arrives here, scoped to this conid.
+            if getattr(contract_arg, "conId", None) != conid:
+                return
+            state = self._depth_streams.get(conid)
+            if not state:
+                return
+            state["error_msg"] = msg or f"Depth data unavailable (error {code})."
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(self._broadcast_depth_event(conid))
+
+        def _on_update(*_args: object) -> None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(self._broadcast_depth_event(conid))
+
+        self._ib.errorEvent += _on_error
+        ticker.updateEvent += _on_update
+        self._depth_streams[conid] = {
+            "contract": contract,
+            "ticker": ticker,
+            "error_handler": _on_error,
+            "update_handler": _on_update,
+            "error_msg": None,
+        }
+
+    def unsubscribe_depth(self, websocket: WebSocket, conid: int) -> None:
+        self._remove_stream_ownership(websocket, conid, "depth")
+        if self._stream_has_other_holder(websocket, conid, "depth"):
+            return
+        state = self._depth_streams.pop(conid, None)
+        if not state:
+            return
+        ticker = state["ticker"]
+        ticker.updateEvent -= state["update_handler"]
+        self._ib.errorEvent -= state["error_handler"]
+        self._ib.cancelMktDepth(state["contract"])
 
     async def _broadcast_stream_status(self, connected: bool) -> None:
         event = TwsStreamStatusEvent(connected=connected).model_dump()

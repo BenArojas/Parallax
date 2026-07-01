@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 
 import { useTwsLiveStream, type TwsLiveStreamMessage, type TwsStreamChannel } from "./useTwsLiveStream";
-import type { TwsBarUpdateEvent, TwsQuoteStreamEvent, TwsTimeframe } from "./api";
+import type { TwsBarUpdateEvent, TwsDepthUpdateEvent, TwsQuoteStreamEvent, TwsTimeframe } from "./api";
 
 type TwsStreamChannelEventMap = {
   quote: TwsQuoteStreamEvent;
   bars: TwsBarUpdateEvent;
-  depth: TwsLiveStreamMessage;
+  depth: TwsDepthUpdateEvent;
 };
 
 const STREAM_EVENT_TYPES: Record<TwsStreamChannel, string> = {
   quote: "tws_quote",
   bars: "tws_bar_update",
-  depth: "tws_depth",
+  depth: "tws_depth_update",
 };
 
 function hasConid(msg: TwsLiveStreamMessage): msg is TwsLiveStreamMessage & { conid: number; timeframe?: TwsTimeframe } {
@@ -39,7 +39,7 @@ export function useTwsStreamChannel<TChannel extends TwsStreamChannel>(
       if (!hasConid(msg)) return;
       if (msg.conid !== conid) return;
       if (channel === "bars" && timeframe && msg.timeframe !== timeframe) return;
-      setEvent(msg as TwsStreamChannelEventMap[TChannel]);
+      setEvent(msg as unknown as TwsStreamChannelEventMap[TChannel]);
     });
 
     return () => {

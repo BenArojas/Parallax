@@ -145,6 +145,77 @@ def test_stream_quote_prefers_ticker_data_over_10089_warning():
     assert websocket.sent[1]["unavailable_reason"] == "API market data subscription required; delayed market data may be available."
 
 
+def test_stream_depth_emits_levels_and_unavailable_on_error():
+    from ib_async.objects import DOMLevel
+
+    class _FakeTicker:
+        def __init__(self, contract: object) -> None:
+            self.contract = contract
+            self.updateEvent = _CallableEvent()
+            self.domBids: list[DOMLevel] = []
+            self.domAsks: list[DOMLevel] = []
+
+    class _FakeIB:
+        def __init__(self) -> None:
+            self.errorEvent = _CallableEvent()
+            self.tickers: dict[int, _FakeTicker] = {}
+            self.cancelled: list[object] = []
+
+        def isConnected(self) -> bool:
+            return True
+
+        def reqMktDepth(self, contract: object, numRows: int = 5):
+            ticker = _FakeTicker(contract)
+            self.tickers[contract.conId] = ticker
+            return ticker
+
+        def cancelMktDepth(self, contract: object, isSmartDepth: bool = False) -> None:
+            self.cancelled.append(contract)
+
+    class _WebSocketStub:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+            self.client_state = WebSocketState.CONNECTED
+            self.application_state = WebSocketState.CONNECTED
+
+        async def send_json(self, payload: dict[str, object]) -> None:
+            self.sent.append(payload)
+
+    adapter = TwsBrokerAdapter()
+    adapter._ib = _FakeIB()  # type: ignore[assignment]
+    adapter._state = "connected"
+    websocket = _WebSocketStub()
+
+    async def _exercise() -> None:
+        await adapter.stream_subscribe(
+            websocket,  # type: ignore[arg-type]
+            TwsStreamSubscribeRequest(action="subscribe", channel="depth", conid=123),
+        )
+        ticker = adapter._ib.tickers[123]
+
+        # Happy path: real levels flow through as entitlement="live".
+        ticker.domBids = [DOMLevel(price=99.5, size=200, marketMaker="ARCA")]
+        ticker.domAsks = [DOMLevel(price=99.6, size=150, marketMaker="NSDQ")]
+        ticker.updateEvent.emit(ticker)
+        await asyncio.sleep(0)
+
+        # Unavailable path: a depth-permission error (e.g. 10092) never raises —
+        # it only arrives via IB.errorEvent, scoped to this conid.
+        adapter._ib.errorEvent.emit(2, 10092, "Deep market data is not supported for this contract.", SimpleNamespace(conId=123))
+        await asyncio.sleep(0)
+
+    asyncio.run(_exercise())
+
+    assert websocket.sent[0]["entitlement"] == "live"
+    assert websocket.sent[0]["bids"] == [{"price": 99.5, "size": 200, "market_maker": "ARCA"}]
+    assert websocket.sent[0]["asks"] == [{"price": 99.6, "size": 150, "market_maker": "NSDQ"}]
+
+    assert websocket.sent[1]["entitlement"] == "unavailable"
+    assert websocket.sent[1]["bids"] == []
+    assert websocket.sent[1]["asks"] == []
+    assert websocket.sent[1]["unavailable_reason"] == "Deep market data is not supported for this contract."
+
+
 class _StreamAdapterStub:
     def __init__(self) -> None:
         self.cleaned_up = False
