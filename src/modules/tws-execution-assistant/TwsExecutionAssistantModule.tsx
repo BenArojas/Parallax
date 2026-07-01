@@ -6,14 +6,15 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { BROKER_SESSION_KEY } from "@/context/BrokerSessionContext";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsPackageWarning, type TwsTimeframe } from "./api";
+import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
+import { OrderRow } from "./OrderRow";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
 import { BracketBuilderPanel } from "./BracketBuilderPanel";
 import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
+import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
-import { groupBracketOrders, type BracketOrderPackage } from "./bracketPackages";
+import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
 
 const STATUS_KEY = ["tws-status"];
@@ -212,115 +213,6 @@ function EmptyTableState({ label }: { label: string }) {
   );
 }
 
-function UnmanagedBadge() {
-  return (
-    <span className="rounded bg-[var(--glow-orange)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--clr-orange)]">
-      unmanaged
-    </span>
-  );
-}
-
-function OrderRow({
-  order,
-  warnings,
-  onCancel,
-  onModify,
-}: {
-  order: OrderSnapshot;
-  warnings: TwsPackageWarning[];
-  onCancel: (order_id: number) => void;
-  onModify: (order: OrderSnapshot) => void;
-}) {
-  const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const rowWarnings = warnings.filter((w) => w.order_ids.includes(order.order_id));
-  const priceDisplay = (() => {
-    if (order.lmt_price != null && order.stop_price != null)
-      return `STP ${order.stop_price.toFixed(2)} / LMT ${order.lmt_price.toFixed(2)}`;
-    if (order.stop_price != null) return order.stop_price.toFixed(2);
-    if (order.lmt_price != null) return order.lmt_price.toFixed(2);
-    return "—";
-  })();
-  return (
-    <tr className={cn("border-t border-border text-xs transition-colors", confirmingCancel && "bg-[var(--clr-red)]/5")}>
-      <td className="py-1.5 pr-3 font-medium">
-        <span className="inline-flex items-center gap-1.5">
-          {order.symbol}
-          {rowWarnings.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="cursor-help text-[var(--clr-orange)]" aria-label="Package warning">
-                    ⚠
-                  </span>
-                }
-              />
-              <TooltipContent>
-                <div className="space-y-1">
-                  {rowWarnings.map((w, i) => (
-                    <p key={i}>{w.message}</p>
-                  ))}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </span>
-      </td>
-      <td className={`pr-3 ${order.side === "BUY" ? "text-[var(--clr-green)]" : "text-[var(--clr-red)]"}`}>
-        {order.side}
-      </td>
-      <td className="pr-3 font-data">{order.quantity}</td>
-      <td className="pr-3 font-data text-[var(--text-2)]">{order.order_type}</td>
-      <td className="pr-3 font-data text-[var(--text-2)]">{priceDisplay}</td>
-      <td className="pr-3 text-[var(--text-2)]">{order.status}</td>
-      <td className="pr-3 text-[var(--text-3)]">{order.parent_id ?? "—"}</td>
-      <td className="pr-3 text-[var(--text-3)]">{order.oca_group ? order.oca_group.split("-").pop() : "—"}</td>
-      <td className="pr-2">{order.is_unmanaged && <UnmanagedBadge />}</td>
-      <td className="whitespace-nowrap py-1">
-        <div className="flex items-center gap-1.5">
-          {confirmingCancel ? (
-            <div className="flex items-center gap-1 rounded-full border border-[var(--clr-red)]/40 bg-[var(--clr-red)]/8 px-2 py-0.5">
-              <span className="text-[9px] text-[var(--text-3)]">Sure?</span>
-              <button
-                type="button"
-                className="rounded px-1.5 py-0.5 text-[9px] font-semibold text-[var(--clr-red)] hover:bg-[var(--clr-red)]/20 active:scale-95"
-                onClick={() => { onCancel(order.order_id); setConfirmingCancel(false); }}
-              >
-                Yes
-              </button>
-              <button
-                type="button"
-                className="rounded px-1 py-0.5 text-[10px] leading-none text-[var(--text-3)] hover:text-[var(--text-1)]"
-                onClick={() => setConfirmingCancel(false)}
-              >
-                ✕
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="h-5 rounded border border-[var(--clr-red)]/50 px-1.5 text-[10px] text-[var(--clr-red)] hover:bg-[var(--clr-red)]/10 active:scale-95"
-              onClick={() => setConfirmingCancel(true)}
-            >
-              Cancel
-            </button>
-          )}
-          {canModifyOrderType(order.order_type) ? (
-            <button
-              type="button"
-              className="h-5 rounded border border-[var(--clr-cyan)]/50 px-1.5 text-[10px] text-[var(--clr-cyan)] hover:bg-[var(--clr-cyan)]/10 active:scale-95"
-              onClick={() => onModify(order)}
-            >
-              Modify
-            </button>
-          ) : (
-            <span className="text-[10px] text-[var(--text-3)]" title="Modify not supported for this order type.">—</span>
-          )}
-        </div>
-      </td>
-    </tr>
-  );
-}
-
 function packageLegPrice(order: OrderSnapshot): string {
   if (order.lmt_price != null && order.stop_price != null)
     return `STP ${order.stop_price.toFixed(2)} / LMT ${order.lmt_price.toFixed(2)}`;
@@ -392,39 +284,60 @@ function ScaleOutPackageRows({
   );
 }
 
-/** A bracket's legs stay individually cancelable/modifiable (unlike a
- * scale-out lot, canceling one bracket leg is a normal, self-contained
- * action) — this just adds the same package header banner so the user can
- * see at a glance that these rows are one linked bracket, not unrelated orders. */
+/** A bracket's legs are one linked package, same as a scale-out lot — no
+ * per-leg Cancel/Modify here. "Manage bracket" reopens this package in the
+ * Execution Plan panel, where each leg can still be canceled/modified
+ * individually (unlike scale-out's read-only manager, a bracket leg really
+ * is just one order and needs no coordinated multi-leg edit). */
 function BracketPackageRows({
   pkg,
-  warnings,
-  onCancel,
-  onModify,
+  onManage,
 }: {
   pkg: BracketOrderPackage;
-  warnings: TwsPackageWarning[];
-  onCancel: (order_id: number) => void;
-  onModify: (order: OrderSnapshot) => void;
+  onManage: () => void;
 }) {
   return (
     <>
       <tr className="border-t border-border bg-[var(--glow-orange)]/40 text-xs">
         <td colSpan={10} className="py-1.5 pr-3">
-          <span className="inline-flex items-center gap-2">
-            <span className="rounded bg-[var(--clr-orange)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--clr-orange)]">
-              Bracket
+          <div className="flex items-center justify-between gap-3">
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded bg-[var(--clr-orange)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--clr-orange)]">
+                Bracket
+              </span>
+              <span className="font-medium">{pkg.symbol}</span>
+              <span className="text-[var(--text-3)]">pkg {pkg.packageId.slice(0, 8)}</span>
+              {pkg.warnings.length > 0 && (
+                <span className="text-[var(--clr-orange)]">⚠ {pkg.warnings.length}</span>
+              )}
             </span>
-            <span className="font-medium">{pkg.symbol}</span>
-            <span className="text-[var(--text-3)]">pkg {pkg.packageId.slice(0, 8)}</span>
-            {pkg.warnings.length > 0 && (
-              <span className="text-[var(--clr-orange)]">⚠ {pkg.warnings.length}</span>
-            )}
-          </span>
+            <button
+              type="button"
+              className="h-5 shrink-0 rounded border border-[var(--clr-orange)]/50 px-2 text-[10px] text-[var(--clr-orange)] hover:bg-[var(--clr-orange)]/10 active:scale-95"
+              onClick={onManage}
+            >
+              Manage bracket
+            </button>
+          </div>
         </td>
       </tr>
       {pkg.orders.map((order) => (
-        <OrderRow key={order.order_id} order={order} warnings={warnings} onCancel={onCancel} onModify={onModify} />
+        <tr key={order.order_id} className="border-t border-border/40 text-xs">
+          <td className="py-1 pr-3 pl-4 text-[var(--text-3)]">
+            {parseBracketOrderRef(order.order_ref)?.roleType ?? "—"}
+          </td>
+          <td className={`pr-3 ${order.side === "BUY" ? "text-[var(--clr-green)]" : "text-[var(--clr-red)]"}`}>
+            {order.side}
+          </td>
+          <td className="pr-3 font-data">{order.quantity}</td>
+          <td className="pr-3 font-data text-[var(--text-2)]">{order.order_type}</td>
+          <td className="pr-3 font-data text-[var(--text-2)]">{packageLegPrice(order)}</td>
+          <td className="pr-3 text-[var(--text-2)]">{order.status}</td>
+          <td className="pr-3 text-[var(--text-3)]">{order.parent_id ?? "—"}</td>
+          <td className="pr-3 text-[var(--text-3)]">{order.oca_group ? order.oca_group.split("-").pop() : "—"}</td>
+          <td className="pr-2" />
+          <td className="whitespace-nowrap py-1 text-[10px] text-[var(--text-3)]">—</td>
+        </tr>
       ))}
     </>
   );
@@ -449,6 +362,7 @@ export function TwsExecutionAssistantModule() {
   const [modifyReview, setModifyReview] = useState(false);
   const [advancedReject, setAdvancedReject] = useState<TwsAdvancedReject | null>(null);
   const [managedScaleOutPackageId, setManagedScaleOutPackageId] = useState<string | null>(null);
+  const [managedBracketPackageId, setManagedBracketPackageId] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: STATUS_KEY,
@@ -468,6 +382,7 @@ export function TwsExecutionAssistantModule() {
     : { packages: [] as ScaleOutOrderPackage[], standaloneOrders: [] as OrderSnapshot[] };
   const { packages: bracketPackages, standaloneOrders } = groupBracketOrders(afterScaleOut, recon?.package_warnings ?? []);
   const managedScaleOutPackage = scaleOutPackages.find((p) => p.packageId === managedScaleOutPackageId) ?? null;
+  const managedBracketPackage = bracketPackages.find((p) => p.packageId === managedBracketPackageId) ?? null;
 
   const connectMutation = useMutation({
     mutationFn: twsApi.connect,
@@ -695,6 +610,21 @@ export function TwsExecutionAssistantModule() {
     enabled: status?.connected === true && planForm.conid > 0,
     staleTime: 60_000,
   });
+
+  /** Single entry point for "Modify" anywhere in Open Orders (standalone rows
+   * or from inside a package manager panel). Clears every other transient
+   * Execution Plan view first — otherwise the panel's priority ternary would
+   * keep showing whichever managed-package view was already open instead of
+   * the modify form, the same silently-does-nothing bug class hit before. */
+  function focusOrderForModify(order: OrderSnapshot) {
+    setManagedScaleOutPackageId(null);
+    setManagedBracketPackageId(null);
+    setPlanMode("standard");
+    setEditingOrder(order);
+    setModifyForm({ quantity: order.quantity, limit_price: order.lmt_price, stop_price: order.stop_price });
+    setModifyReview(false);
+    modifyOrderMutation.reset();
+  }
 
   function selectPlanMode(mode: PlanMode) {
     if (mode === planMode) return;
@@ -957,6 +887,14 @@ export function TwsExecutionAssistantModule() {
                 <ScaleOutPackageManagerPanel
                   pkg={managedScaleOutPackage}
                   onClose={() => setManagedScaleOutPackageId(null)}
+                />
+              ) : managedBracketPackage != null ? (
+                <BracketPackageManagerPanel
+                  pkg={managedBracketPackage}
+                  warnings={recon?.package_warnings ?? []}
+                  onClose={() => setManagedBracketPackageId(null)}
+                  onCancel={(id) => cancelOrderMutation.mutate(id)}
+                  onModify={focusOrderForModify}
                 />
               ) : advancedReject != null ? (
                 <div className="flex h-full flex-col">
@@ -1698,6 +1636,7 @@ export function TwsExecutionAssistantModule() {
                         onManage={() => {
                           setAdvancedReject(null);
                           setEditingOrder(null);
+                          setManagedBracketPackageId(null);
                           setManagedScaleOutPackageId(pkg.packageId);
                         }}
                       />
@@ -1706,14 +1645,11 @@ export function TwsExecutionAssistantModule() {
                       <BracketPackageRows
                         key={pkg.packageId}
                         pkg={pkg}
-                        warnings={recon.package_warnings}
-                        onCancel={(id) => cancelOrderMutation.mutate(id)}
-                        onModify={(order) => {
-                          setPlanMode("standard");
-                          setEditingOrder(order);
-                          setModifyForm({ quantity: order.quantity, limit_price: order.lmt_price, stop_price: order.stop_price });
-                          setModifyReview(false);
-                          modifyOrderMutation.reset();
+                        onManage={() => {
+                          setAdvancedReject(null);
+                          setEditingOrder(null);
+                          setManagedScaleOutPackageId(null);
+                          setManagedBracketPackageId(pkg.packageId);
                         }}
                       />
                     ))}
@@ -1723,15 +1659,7 @@ export function TwsExecutionAssistantModule() {
                         order={o}
                         warnings={recon.package_warnings}
                         onCancel={(id) => cancelOrderMutation.mutate(id)}
-                        onModify={(order) => {
-                          // Modify applies to any individual order by order_id (package-agnostic),
-                          // but its form lives in Standard mode — switch so the toggle matches what's shown.
-                          setPlanMode("standard");
-                          setEditingOrder(order);
-                          setModifyForm({ quantity: order.quantity, limit_price: order.lmt_price, stop_price: order.stop_price });
-                          setModifyReview(false);
-                          modifyOrderMutation.reset();
-                        }}
+                        onModify={focusOrderForModify}
                       />
                     ))}
                   </tbody>

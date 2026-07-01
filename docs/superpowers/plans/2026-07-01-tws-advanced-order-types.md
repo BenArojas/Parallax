@@ -407,14 +407,33 @@ framing, not requested here).
   New `src/modules/tws-execution-assistant/bracketPackages.ts`
   (`parseBracketOrderRef`/`groupBracketOrders`, one focused test) plus a
   `BracketPackageRows` header banner (orange "Bracket" tag, distinct from
-  scale-out's purple "Scale-Out" tag) in
-  `TwsExecutionAssistantModule.tsx`. Unlike scale-out packages, bracket legs
-  keep normal per-leg Cancel/Modify — a bracket leg is still an independently
-  cancelable/modifiable order, so no "Manage package" read-only view was
-  added; this is purely a visual grouping/tagging change, no new mutation
-  behavior. `groupBracketOrders` takes plain orders + warnings (not a full
+  scale-out's purple "Scale-Out" tag) in `TwsExecutionAssistantModule.tsx`.
+  `groupBracketOrders` takes plain orders + warnings (not a full
   `ReconciliationSnapshot`) so it chains after `groupScaleOutOrders`'s
   `standaloneOrders` without either grouping misclassifying the other kind.
+  First cut kept per-leg Cancel/Modify in Open Orders for bracket legs;
+  **superseded same day** per explicit user feedback ("treat it as a
+  package") — see next entry.
+- [x] **Follow-up (2026-07-01): "Manage bracket" reopens the package in
+  Execution Plan instead of per-leg actions in Open Orders.** Bracket legs
+  no longer show Cancel/Modify inline (matching scale-out's package
+  treatment); a "Manage bracket" button opens
+  `BracketPackageManagerPanel.tsx` in the Execution Plan panel. Unlike
+  scale-out's read-only manager, this one IS actionable — a bracket leg is
+  still just one order (not a coordinated multi-leg edit), so each row keeps
+  real Cancel/Modify, reusing the real `OrderRow` component. `OrderRow` (and
+  its `UnmanagedBadge` helper) was extracted to its own
+  `src/modules/tws-execution-assistant/OrderRow.tsx` to avoid a circular
+  import (`BracketPackageManagerPanel.tsx` needs `OrderRow`, and
+  `TwsExecutionAssistantModule.tsx` needs `BracketPackageManagerPanel`).
+  Added a shared `focusOrderForModify()` in `TwsExecutionAssistantModule.tsx`
+  that every Modify entry point (standalone rows, inside Manage Bracket) now
+  calls — it clears both `managedScaleOutPackageId` and
+  `managedBracketPackageId` before opening the edit form, and "Manage
+  bracket"/"Manage package" each clear the other package kind's id too.
+  This closes a latent version of the same silently-does-nothing ternary bug
+  hit earlier in Mission 2, which the standalone-only `onModify` path had
+  never actually been patched against.
 - [ ] Run:
 
 ```bash
