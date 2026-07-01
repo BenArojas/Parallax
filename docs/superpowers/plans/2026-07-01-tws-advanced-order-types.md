@@ -289,16 +289,33 @@ Separately, user feedback ("I don't like the UI... make it feel less robotic") l
 **Interfaces:**
 - Extends `OrderSnapshot` with `parent_id`, `oca_group`, and `order_ref`.
 
-- [ ] Add nullable fields to backend `OrderSnapshot`: `parent_id`, `oca_group`, `order_ref`.
-- [ ] Populate those fields from `trade.order.parentId`, `trade.order.ocaGroup`, and `trade.order.orderRef`.
-- [ ] Add matching optional fields to frontend `OrderSnapshot`.
-- [ ] Do not create a persistent package store.
-- [ ] Run:
+- [x] Add nullable fields to backend `OrderSnapshot`: `parent_id`, `oca_group`, `order_ref`. (Batch 2)
+- [x] Populate those fields from `trade.order.parentId`, `trade.order.ocaGroup`, and `trade.order.orderRef`. (Batch 2)
+- [x] Add matching optional fields to frontend `OrderSnapshot`. (Batch 2)
+- [x] Do not create a persistent package store.
+- [x] Run:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_reconciliation.py -q
 npm run typecheck
 ```
+
+**Reconciliation warnings (2026-07-01):** the fields above were done in Batch 2;
+the field bullets were stale describing already-shipped work, so the
+remaining scope was package-shape *warnings* derived from those fields:
+`backend/services/tws_order_packages.py::derive_package_warnings()` parses
+`ORBIT:TWS:<package_id>:<role>` order refs from `open_orders` and flags
+malformed refs, cross-lot `parentId`/`ocaGroup` sharing (the Task 2.5 bug,
+now guarded against regression at the reconciliation layer too), unrecognized
+roles, and sell exposure exceeding the current long position (respecting OCA
+grouping so one lot's target+stop+MOC legs count once, not three times). New
+`TwsPackageWarning` model on `ReconciliationSnapshot.package_warnings`,
+wired into `TwsBrokerAdapter.get_reconciliation()`. Surfaced read-only next
+to the existing unmanaged-order notice in the Open Orders panel — no
+cancel/fix actions, no persistence. Two tests: one public-boundary (cross-lot
+`parentId` via HTTP), one helper-level (OCA-grouping-aware sell exposure,
+including a check that pre-existing intentional shorts never false-positive).
+Commit: `feat: add tws package reconciliation warnings`.
 
 - [ ] Commit:
 
@@ -482,6 +499,8 @@ git commit -m "docs: update tws advanced order status"
 - Batch 2: Tasks 2 and 3 (reconciliation fields only; package reconciliation
   warnings still open). DONE. Code review on this batch found a client-trusted
   preview at submit time and colliding OCA names; both fixed same batch.
+- Task 3 follow-up (2026-07-01): package reconciliation warnings, the part of
+  Task 3 left open after Batch 2. DONE — see the note under Task 3.
 - Batch 2.5 (unplanned, vertical-slice repair): Task 2.5. A focused paper-account
   smoke test on Batch 2's output surfaced the shared-parent OCA/quantity bug
   before Batch 3 could build brackets/trailing on top of the same broken
