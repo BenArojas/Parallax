@@ -336,14 +336,8 @@ Plan: `docs/superpowers/plans/2026-07-01-scale-out-cockpit-v2.md`. Both
 batches passed independent spec-compliance + code-quality subagent review
 with no Critical/Important issues. `npm run typecheck` clean throughout;
 `scaleOutScenario.test.ts` and `scaleOutPackages.test.ts` pass (both exact
-tests specified in the plan). **Manual smoke: not yet run** — the sandbox's
-browser preview tool cannot reach this app's dev server (established
-limitation from earlier in Mission 2), so the plan's manual smoke targets
-(symbol search resolving INTC and syncing the chart, calculator showing
-+$225/-$130/-$80/-$5 for the 20-share story, Open Orders grouping a real
-scale-out package, normal orders keeping Cancel/Modify while package legs
-don't) still need a human pass in the live app before this is considered
-fully verified.
+tests specified in the plan). **Manual smoke: PASSED (2026-07-01)** — user
+confirmed against the live app.
 
 ### Task 4: Add Bracket Packages
 
