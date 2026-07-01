@@ -710,7 +710,11 @@ export function AdvancedOrderPanel({
         </button>
         {!req && (
           <span className="text-[11px] text-[var(--text-3)]">
-            Fill symbol, quantity, and this order type's required fields.
+            {!symbol
+              ? "Enter a symbol to search."
+              : !conid
+                ? "Search and resolve the symbol first — click the search icon or press Enter."
+                : "Fill quantity and this order type's required fields."}
           </span>
         )}
         {previewMutation.isError && (
