@@ -64,12 +64,30 @@ export interface OrderSnapshot {
   order_ref: string | null;
 }
 
+export type TwsPackageWarningKind =
+  | "malformed_order_ref"
+  | "cross_lot_parent_id"
+  | "cross_lot_oca_group"
+  | "sell_exposure_exceeds_position"
+  | "unknown_role";
+
+export interface TwsPackageWarning {
+  kind: TwsPackageWarningKind;
+  severity: "warning";
+  message: string;
+  package_id: string | null;
+  conid: number | null;
+  symbol: string | null;
+  order_ids: number[];
+}
+
 export interface ReconciliationSnapshot {
   position_count: number;
   open_order_count: number;
   unmanaged_order_count: number;
   positions: PositionSnapshot[];
   open_orders: OrderSnapshot[];
+  package_warnings: TwsPackageWarning[];
 }
 
 export interface TwsConnectRequest {

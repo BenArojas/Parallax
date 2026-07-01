@@ -78,12 +78,32 @@ class OrderSnapshot(BaseModel):
     order_ref: str | None = None
 
 
+TwsPackageWarningKind = Literal[
+    "malformed_order_ref",
+    "cross_lot_parent_id",
+    "cross_lot_oca_group",
+    "sell_exposure_exceeds_position",
+    "unknown_role",
+]
+
+
+class TwsPackageWarning(BaseModel):
+    kind: TwsPackageWarningKind
+    severity: Literal["warning"] = "warning"
+    message: str
+    package_id: str | None = None
+    conid: int | None = None
+    symbol: str | None = None
+    order_ids: list[int] = []
+
+
 class ReconciliationSnapshot(BaseModel):
     position_count: int = 0
     open_order_count: int = 0
     unmanaged_order_count: int = 0
     positions: list[PositionSnapshot] = []
     open_orders: list[OrderSnapshot] = []
+    package_warnings: list[TwsPackageWarning] = []
 
 
 class InstrumentResult(BaseModel):

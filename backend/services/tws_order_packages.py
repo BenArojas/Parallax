@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
 import uuid
 
 from models.tws_execution_assistant import (
+    OrderSnapshot,
+    PositionSnapshot,
     TwsOrderLegPreview,
     TwsOrderPackagePreview,
     TwsOrderPackageRequest,
+    TwsPackageWarning,
     TwsScaleOutLotDraft,
 )
 
@@ -155,3 +159,154 @@ def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview
         symbol=req.symbol,
         legs=_scale_out_ladder_legs(req, package_id),
     )
+
+
+# ── Reconciliation warnings (Task 3) ─────────────────────────────────────────
+#
+# Read-only checks over the current TWS reconciliation snapshot (open_orders,
+# positions) looking for package-shape problems Orbit itself would create by
+# mistake — not a general order-book auditor. No persistence: recomputed fresh
+# from whatever TWS reports as open right now.
+
+_ORDER_REF_PATTERN = re.compile(r"^ORBIT:TWS:([^:]+):([^:]+)$")
+_LOT_ROLE_PATTERN = re.compile(r"^lot(\d+)_(.+)$")
+_KNOWN_LOT_ROLE_SUFFIXES = frozenset({"entry", "target", "stop", "trail", "moc_fallback"})
+
+
+def _parse_order_ref(order_ref: str) -> tuple[str, str] | None:
+    """Return (package_id, role) for a well-formed ORBIT:TWS:<package_id>:<role> ref, else None."""
+    match = _ORDER_REF_PATTERN.match(order_ref)
+    return (match.group(1), match.group(2)) if match else None
+
+
+def _lot_index(role: str) -> int | None:
+    match = _LOT_ROLE_PATTERN.match(role)
+    return int(match.group(1)) if match else None
+
+
+def _is_known_role(role: str) -> bool:
+    match = _LOT_ROLE_PATTERN.match(role)
+    return match is not None and match.group(2) in _KNOWN_LOT_ROLE_SUFFIXES
+
+
+def _cross_lot_sharing_warnings(
+    kind: str,
+    package_id: str,
+    order_ids: list[int],
+    by_order_id: dict[int, OrderSnapshot],
+    roles: dict[int, str],
+    field: str,
+) -> list[TwsPackageWarning]:
+    """Shared logic for the parent_id and oca_group cross-lot checks — same shape, different field."""
+    lots_by_value: dict[object, set[int]] = {}
+    for order_id in order_ids:
+        lot = _lot_index(roles[order_id])
+        value = getattr(by_order_id[order_id], field)
+        if lot is None or value is None:
+            continue
+        lots_by_value.setdefault(value, set()).add(lot)
+
+    warnings: list[TwsPackageWarning] = []
+    for value, lots in lots_by_value.items():
+        if len(lots) <= 1:
+            continue
+        matching_ids = [oid for oid in order_ids if getattr(by_order_id[oid], field) == value]
+        warnings.append(TwsPackageWarning(
+            kind=kind,  # type: ignore[arg-type]
+            message=(
+                f"Package {package_id}: lots {sorted(lots)} share {field} {value!r} — "
+                "TWS may treat them as one linked group instead of isolating each lot."
+            ),
+            package_id=package_id,
+            order_ids=matching_ids,
+        ))
+    return warnings
+
+
+def derive_package_warnings(
+    open_orders: list[OrderSnapshot],
+    positions: list[PositionSnapshot],
+) -> list[TwsPackageWarning]:
+    """Read-only scan for package-shape problems in the current reconciliation snapshot.
+
+    A missing parent entry is never flagged on its own — a filled parent normally
+    disappears from open_orders, which is expected, not a warning.
+    """
+    warnings: list[TwsPackageWarning] = []
+    by_order_id = {o.order_id: o for o in open_orders}
+
+    roles: dict[int, str] = {}
+    package_ids: dict[int, str] = {}
+    for order in open_orders:
+        ref = order.order_ref
+        if not ref or not ref.startswith("ORBIT:"):
+            continue
+        parsed = _parse_order_ref(ref)
+        if parsed is None:
+            warnings.append(TwsPackageWarning(
+                kind="malformed_order_ref",
+                message=f"Order {order.order_id} has a malformed Orbit order_ref: {ref!r}.",
+                conid=order.conid,
+                symbol=order.symbol,
+                order_ids=[order.order_id],
+            ))
+            continue
+        package_id, role = parsed
+        roles[order.order_id] = role
+        package_ids[order.order_id] = package_id
+        if not _is_known_role(role):
+            warnings.append(TwsPackageWarning(
+                kind="unknown_role",
+                message=f"Order {order.order_id} has an unrecognized package role {role!r}.",
+                package_id=package_id,
+                conid=order.conid,
+                symbol=order.symbol,
+                order_ids=[order.order_id],
+            ))
+
+    orders_by_package: dict[str, list[int]] = {}
+    for order_id, package_id in package_ids.items():
+        orders_by_package.setdefault(package_id, []).append(order_id)
+
+    for package_id, order_ids in orders_by_package.items():
+        warnings.extend(_cross_lot_sharing_warnings(
+            "cross_lot_parent_id", package_id, order_ids, by_order_id, roles, "parent_id",
+        ))
+        warnings.extend(_cross_lot_sharing_warnings(
+            "cross_lot_oca_group", package_id, order_ids, by_order_id, roles, "oca_group",
+        ))
+
+    # Active sell exposure vs. the current long position, respecting OCA grouping:
+    # orders sharing one oca_group are alternatives for the same shares (only one
+    # can actually execute), so they count once — not once per leg.
+    position_by_conid = {p.conid: p.position for p in positions}
+    sell_orders_by_conid: dict[int, list[OrderSnapshot]] = {}
+    for order in open_orders:
+        if order.side == "SELL":
+            sell_orders_by_conid.setdefault(order.conid, []).append(order)
+
+    for conid, orders in sell_orders_by_conid.items():
+        position = position_by_conid.get(conid, 0.0)
+        if position <= 0:
+            continue  # not a long position — over-sell risk is a different, already-accepted category
+        grouped_max: dict[str, float] = {}
+        ungrouped_total = 0.0
+        for order in orders:
+            if order.oca_group:
+                grouped_max[order.oca_group] = max(grouped_max.get(order.oca_group, 0.0), order.quantity)
+            else:
+                ungrouped_total += order.quantity
+        exposure = sum(grouped_max.values()) + ungrouped_total
+        if exposure > position:
+            warnings.append(TwsPackageWarning(
+                kind="sell_exposure_exceeds_position",
+                message=(
+                    f"{orders[0].symbol}: active sell exposure ({exposure:g} shares) exceeds "
+                    f"the current long position ({position:g})."
+                ),
+                conid=conid,
+                symbol=orders[0].symbol,
+                order_ids=[o.order_id for o in orders],
+            ))
+
+    return warnings

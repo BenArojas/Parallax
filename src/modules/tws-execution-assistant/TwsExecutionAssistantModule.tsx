@@ -1493,6 +1493,13 @@ export function TwsExecutionAssistantModule() {
                     {recon.unmanaged_order_count} unmanaged
                   </p>
                 )}
+                {recon.package_warnings.length > 0 && (
+                  <div className="mb-2 space-y-1">
+                    {recon.package_warnings.map((w, i) => (
+                      <p key={i} className="text-xs text-[var(--clr-orange)]">⚠ {w.message}</p>
+                    ))}
+                  </div>
+                )}
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="text-xs text-[var(--text-3)]">

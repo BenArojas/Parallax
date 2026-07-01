@@ -14,6 +14,7 @@ from ib_async import IB, Contract, Order
 
 from models.broker_session import BrokerSessionMode
 from models.tws_order_capabilities import can_modify_order_type
+from services.tws_order_packages import derive_package_warnings
 
 if TYPE_CHECKING:
     from models.execution_plan import ExecutionPlan
@@ -434,6 +435,7 @@ class TwsBrokerAdapter:
             unmanaged_order_count=sum(1 for o in open_orders if o.is_unmanaged),
             positions=positions,
             open_orders=open_orders,
+            package_warnings=derive_package_warnings(open_orders, positions),
         )
 
     async def place_order(
