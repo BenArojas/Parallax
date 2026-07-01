@@ -202,3 +202,44 @@ def test_place_order_package_isolates_each_lot_under_its_own_parent():
             oca_groups.append(by_role[role].ocaGroup)
 
     assert len(set(oca_groups)) == len(req.lots)  # each lot's OCA group is distinct, none shared
+
+
+# ── Task 4: Bracket Packages ──────────────────────────────────────────────────
+
+def _bracket_request(**overrides) -> dict:
+    base = {
+        "kind": "bracket",
+        "conid": 270639,
+        "symbol": "INTC",
+        "side": "BUY",
+        "quantity": 100,
+        "order_type": "LMT",
+        "limit_price": 120,
+        "target_price": 125,
+        "stop_price": 115,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_bracket_preview_has_parent_target_stop_and_final_transmit():
+    """A bracket is one shared parent with two children — not scale-out's
+    per-lot parent isolation, since a bracket is exactly one lot."""
+    client = _client()
+    req = _bracket_request()
+
+    r = client.post("/execution-assistant/order-packages/preview", json=req)
+
+    assert r.status_code == 200
+    by_role = {leg["role"]: leg for leg in r.json()["legs"]}
+
+    assert set(by_role) == {"parent", "target", "stop"}
+    assert by_role["parent"]["parent_ref"] is None
+    assert by_role["parent"]["side"] == "BUY"
+    assert by_role["parent"]["transmit"] is False
+    assert by_role["target"]["parent_ref"] == "parent"
+    assert by_role["target"]["side"] == "SELL"  # opposite of the BUY entry
+    assert by_role["target"]["transmit"] is False
+    assert by_role["stop"]["parent_ref"] == "parent"
+    assert by_role["stop"]["side"] == "SELL"
+    assert by_role["stop"]["transmit"] is True  # only the final child transmits

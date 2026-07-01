@@ -341,33 +341,79 @@ confirmed against the live app.
 
 ### Task 4: Add Bracket Packages
 
+**Reframed 2026-07-01 — vertical slice, not backend-only.** Following the
+Scale-Out Cockpit V2 pattern, Task 4 ships a minimal cockpit path alongside
+the backend, not backend-only as originally scoped. Added to the File Map:
+`src/modules/tws-execution-assistant/BracketBuilderPanel.tsx` (new),
+`src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx`
+(extend `PlanMode` to a third `"bracket"` toggle segment, orange accent, no
+sweep animation — that flourish was specific to scale-out's "pro mode"
+framing, not requested here).
+
 **Files:**
 - Modify: `backend/services/tws_order_packages.py`
-- Modify: `backend/services/tws_broker_adapter.py`
+- Modify: `backend/services/tws_broker_adapter.py` (no change needed — leg
+  construction is already kind-agnostic; parentId/transmit/oca_group are
+  resolved generically from `TwsOrderLegPreview`)
 - Test: `backend/tests/test_execution_assistant_advanced_orders.py`
+- Create: `src/modules/tws-execution-assistant/BracketBuilderPanel.tsx`
+- Modify: `src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx`
 
 **Interfaces:**
-- Extends `kind="bracket"` in `TwsOrderPackageRequest`.
+- Extends `kind="bracket"` in `TwsOrderPackageRequest` (already generic
+  enough: `target_price`, `stop_price`, `trail` all exist at the top level
+  from Task 1/2/3 work — no model changes needed).
 
-- [ ] Validate bracket requests:
+- [x] Validate bracket requests:
   - quantity positive.
   - side `BUY` or `SELL`.
   - entry `MKT` or `LMT`; `LMT` requires `limit_price`.
   - positive `target_price`.
   - exactly one stop style: `stop_price` or `trail`.
-- [ ] Preview parent, profit-taker, and stop/trailing child.
-- [ ] Build broker orders using the same parent/child/transmit pattern as `IB.bracketOrder`; use explicit construction when the stop is trailing.
-- [ ] Add one focused test proving bracket preview has parent, profit, stop, and final `transmit=True`.
+- [x] Preview parent, profit-taker, and stop/trailing child — one shared
+  parent (`role="parent"`), unlike scale-out's per-lot parent isolation,
+  because a bracket is exactly one lot; children are the opposite side from
+  the entry.
+- [x] Build broker orders using the same parent/child/transmit pattern as
+  `IB.bracketOrder`: parent `transmit=False`, profit-taker `parentId=parent`
+  `transmit=False`, stop-or-trail child `parentId=parent` `transmit=True`.
+  No explicit `oca_group` on bracket children — TWS's native parent/child
+  bracket linking cancels the sibling on fill, matching `IB.bracketOrder()`.
+- [x] **Side-fix required for correctness, not scope creep:** the Task 3
+  sell-exposure check grouped only by `oca_group`, so a bracket's target +
+  stop (same parent, no `oca_group`) would double-count and always
+  false-positive "exceeds position" on every bracket. Fixed the grouping key
+  to fall back to `parent_id` when `oca_group` is absent
+  (`backend/services/tws_order_packages.py::derive_package_warnings`).
+  Scale-out is unaffected (its legs always set `oca_group`). Also extended
+  `_is_known_role` to recognize flat bracket roles (`parent`/`target`/
+  `stop`/`trail`) so brackets don't spuriously trigger `unknown_role`.
+- [x] Add one focused test proving bracket preview has parent, profit, stop,
+  and final `transmit=True`.
+- [x] Frontend: `BracketBuilderPanel.tsx` mirrors the Scale-Out V2 pattern —
+  symbol search (reusing the same resolve-by-search approach as Task 1),
+  side/quantity/entry-type/limit fields, target + stop-or-trail fields,
+  preview leg table (role/side/qty/type/price/parent/transmit), paper/live
+  submit via the existing `previewOrderPackage`/`placePaperOrderPackage`/
+  `placeLiveOrderPackage` endpoints and the existing live-arming gate. Third
+  `PlanMode` toggle segment in `TwsExecutionAssistantModule.tsx` (orange
+  accent, no sweep — that was scale-out-specific "pro mode" flair).
+- [x] Open Orders grouping: bracket order refs (`ORBIT:TWS:<package_id>:parent`
+  etc., no `lot{N}_` prefix) do not match `scaleOutPackages.ts`'s scale-out
+  regex, so they fall through to `standaloneOrders` rather than being
+  misclassified as a scale-out package — no scale-out grouping behavior
+  added for brackets in this slice.
 - [ ] Run:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py -q
+npm run typecheck
 ```
 
 - [ ] Commit:
 
 ```bash
-git add backend/services/tws_order_packages.py backend/services/tws_broker_adapter.py backend/tests/test_execution_assistant_advanced_orders.py
+git add backend/services/tws_order_packages.py backend/tests/test_execution_assistant_advanced_orders.py src/modules/tws-execution-assistant/BracketBuilderPanel.tsx src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx docs/superpowers/plans/2026-07-01-tws-advanced-order-types.md
 git commit -m "feat: add tws bracket packages"
 ```
 

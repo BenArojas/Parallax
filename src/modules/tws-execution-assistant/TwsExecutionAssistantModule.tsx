@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsPackageWarning, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
+import { BracketBuilderPanel } from "./BracketBuilderPanel";
 import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
@@ -166,7 +167,7 @@ function Panel({
   className?: string;
   headerRight?: ReactNode;
   /** Pro-mode accent — shifts the title color and adds a faint panel glow. */
-  accent?: "cyan" | "purple";
+  accent?: "cyan" | "purple" | "orange";
   /** Plays a one-shot light sweep across the header (e.g. on mode switch). */
   sweep?: boolean;
 }) {
@@ -175,6 +176,7 @@ function Panel({
       className={cn(
         "flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-[var(--bg-1)] shadow-sm transition-shadow duration-300",
         accent === "purple" && "shadow-[0_0_0_1px_rgba(180,77,255,0.12),0_0_20px_rgba(180,77,255,0.06)]",
+        accent === "orange" && "shadow-[0_0_0_1px_rgba(255,159,28,0.12),0_0_20px_rgba(255,159,28,0.06)]",
         className,
       )}
     >
@@ -183,7 +185,7 @@ function Panel({
           <h2
             className={cn(
               "text-[10px] font-semibold uppercase tracking-wider transition-colors duration-300",
-              accent === "purple" ? "text-[var(--clr-purple)]" : "text-[var(--clr-cyan)]",
+              accent === "purple" ? "text-[var(--clr-purple)]" : accent === "orange" ? "text-[var(--clr-orange)]" : "text-[var(--clr-cyan)]",
             )}
           >
             {title}
@@ -389,7 +391,7 @@ function ScaleOutPackageRows({
   );
 }
 
-type PlanMode = "standard" | "scale_out";
+type PlanMode = "standard" | "scale_out" | "bracket";
 
 export function TwsExecutionAssistantModule() {
   const queryClient = useQueryClient();
@@ -874,7 +876,7 @@ export function TwsExecutionAssistantModule() {
           <Panel
             title="Execution Plan"
             className="h-[480px]"
-            accent={planMode === "scale_out" ? "purple" : "cyan"}
+            accent={planMode === "scale_out" ? "purple" : planMode === "bracket" ? "orange" : "cyan"}
             sweep={sweeping}
             headerRight={
               <div className="flex shrink-0 rounded-full border border-border p-0.5 text-[9px] font-semibold">
@@ -897,6 +899,16 @@ export function TwsExecutionAssistantModule() {
                   onClick={() => selectPlanMode("scale_out")}
                 >
                   Scale-Out
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    planMode === "bracket" ? "bg-[var(--clr-orange)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                  )}
+                  onClick={() => selectPlanMode("bracket")}
+                >
+                  Bracket
                 </button>
               </div>
             }
@@ -1315,6 +1327,16 @@ export function TwsExecutionAssistantModule() {
                 </div>
               ) : planMode === "scale_out" ? (
                 <ScaleOutLadderPanel
+                  canDraft={canDraft}
+                  isLiveSession={isLiveSession}
+                  connected={status?.connected === true}
+                  onInstrumentResolved={(instrument) => {
+                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
+                    setSelectedExchange(instrument.primary_exchange);
+                  }}
+                />
+              ) : planMode === "bracket" ? (
+                <BracketBuilderPanel
                   canDraft={canDraft}
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}

@@ -255,8 +255,8 @@ export interface TwsOverrideRequest {
 }
 
 // ── Advanced order packages (Mission 2) ──────────────────────────────────────
-// Only "scale_out_ladder" is implemented so far; the other kinds are reserved
-// by the backend contract for later missions and have no cockpit UI yet.
+// "scale_out_ladder" and "bracket" have cockpit UI; the remaining kinds are
+// reserved by the backend contract for later missions and have no UI yet.
 export type TwsAdvancedOrderKind =
   | "scale_out_ladder"
   | "bracket"

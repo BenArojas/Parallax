@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from typing import Literal
 
 from models.tws_execution_assistant import (
     OrderSnapshot,
@@ -11,6 +12,7 @@ from models.tws_execution_assistant import (
     TwsOrderPackageRequest,
     TwsPackageWarning,
     TwsScaleOutLotDraft,
+    TwsTrailSpec,
 )
 
 _LOT_SUM_TOLERANCE = 1e-9
@@ -24,25 +26,30 @@ class TwsOrderPackageValidationError(Exception):
         self.errors = errors
 
 
+def _validate_stop_style(prefix: str, stop_price: float | None, trail: TwsTrailSpec | None) -> list[str]:
+    """Shared by scale-out lots and brackets: exactly one of a fixed stop or a trail."""
+    errors: list[str] = []
+    has_stop = stop_price is not None and stop_price > 0
+    has_trail = trail is not None
+    if has_stop and has_trail:
+        errors.append(f"{prefix} must use exactly one stop style, not both stop_price and trail.")
+    elif not has_stop and not has_trail:
+        errors.append(f"{prefix} requires exactly one stop style: stop_price or trail.")
+    elif has_trail and trail is not None:
+        if trail.mode == "percent" and not (0 < trail.value < 100):
+            errors.append(f"{prefix} percent trail must be greater than 0 and less than 100.")
+        if trail.mode == "amount" and trail.value <= 0:
+            errors.append(f"{prefix} fixed trail value must be positive.")
+    return errors
+
+
 def _validate_lot(index: int, lot: TwsScaleOutLotDraft) -> list[str]:
     errors: list[str] = []
     if lot.quantity <= 0:
         errors.append(f"Lot {index} quantity must be positive.")
     if lot.target_price <= 0:
         errors.append(f"Lot {index} requires a positive target_price.")
-
-    has_stop = lot.stop_price is not None and lot.stop_price > 0
-    has_trail = lot.trail is not None
-    if has_stop and has_trail:
-        errors.append(f"Lot {index} must use exactly one stop style, not both stop_price and trail.")
-    elif not has_stop and not has_trail:
-        errors.append(f"Lot {index} requires exactly one stop style: stop_price or trail.")
-    elif has_trail and lot.trail is not None:
-        if lot.trail.mode == "percent" and not (0 < lot.trail.value < 100):
-            errors.append(f"Lot {index} percent trail must be greater than 0 and less than 100.")
-        if lot.trail.mode == "amount" and lot.trail.value <= 0:
-            errors.append(f"Lot {index} fixed trail value must be positive.")
-
+    errors.extend(_validate_stop_style(f"Lot {index}", lot.stop_price, lot.trail))
     return errors
 
 
@@ -142,22 +149,92 @@ def _scale_out_ladder_legs(req: TwsOrderPackageRequest, package_id: str) -> list
     return legs
 
 
+def _validate_bracket(req: TwsOrderPackageRequest) -> list[str]:
+    errors: list[str] = []
+    if req.quantity <= 0:
+        errors.append("Quantity must be positive.")
+    if req.side not in ("BUY", "SELL"):
+        errors.append("Side must be BUY or SELL.")
+    if req.order_type not in ("MKT", "LMT"):
+        errors.append("Entry order_type must be MKT or LMT.")
+    if req.order_type == "LMT" and not (req.limit_price is not None and req.limit_price > 0):
+        errors.append("LMT entry requires a positive limit_price.")
+    if not (req.target_price is not None and req.target_price > 0):
+        errors.append("A positive target_price is required.")
+    errors.extend(_validate_stop_style("Bracket", req.stop_price, req.trail))
+    return errors
+
+
+def _bracket_legs(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    """Standard IBKR bracket: one parent entry, a profit-taker child, and a
+    stop-or-trailing child, all three sharing the parent's orderId as parentId
+    (mirrors ib_async's IB.bracketOrder() helper). Unlike scale-out, a bracket
+    is exactly one lot, so one shared parent is the correct pattern here — not
+    the per-lot parent isolation scale-out needed for its multi-lot case.
+    """
+    exit_side: Literal["BUY", "SELL"] = "SELL" if req.side == "BUY" else "BUY"
+    legs = [
+        TwsOrderLegPreview(
+            role="parent",
+            side=req.side,
+            quantity=req.quantity,
+            order_type=req.order_type,
+            limit_price=req.limit_price,
+            transmit=False,
+        ),
+        TwsOrderLegPreview(
+            role="target",
+            side=exit_side,
+            quantity=req.quantity,
+            order_type="LMT",
+            limit_price=req.target_price,
+            parent_ref="parent",
+            transmit=False,
+        ),
+    ]
+    if req.trail is not None:
+        legs.append(TwsOrderLegPreview(
+            role="trail",
+            side=exit_side,
+            quantity=req.quantity,
+            order_type="TRAIL",
+            trail=req.trail,
+            parent_ref="parent",
+            transmit=True,
+        ))
+    else:
+        legs.append(TwsOrderLegPreview(
+            role="stop",
+            side=exit_side,
+            quantity=req.quantity,
+            order_type="STP",
+            stop_price=req.stop_price,
+            parent_ref="parent",
+            transmit=True,
+        ))
+    return legs
+
+
 def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview:
     """Validate a package request and return the exact plain-data order graph."""
-    if req.kind != "scale_out_ladder":
+    if req.kind == "scale_out_ladder":
+        errors = _validate_scale_out_ladder(req)
+    elif req.kind == "bracket":
+        errors = _validate_bracket(req)
+    else:
         raise TwsOrderPackageValidationError([f"Unsupported package kind: {req.kind}"])
 
-    errors = _validate_scale_out_ladder(req)
     if errors:
         raise TwsOrderPackageValidationError(errors)
 
     package_id = str(uuid.uuid4())
+    legs = _scale_out_ladder_legs(req, package_id) if req.kind == "scale_out_ladder" else _bracket_legs(req)
     return TwsOrderPackagePreview(
         package_id=package_id,
         kind=req.kind,
         conid=req.conid,
         symbol=req.symbol,
-        legs=_scale_out_ladder_legs(req, package_id),
+        legs=legs,
     )
 
 
@@ -171,6 +248,9 @@ def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview
 _ORDER_REF_PATTERN = re.compile(r"^ORBIT:TWS:([^:]+):([^:]+)$")
 _LOT_ROLE_PATTERN = re.compile(r"^lot(\d+)_(.+)$")
 _KNOWN_LOT_ROLE_SUFFIXES = frozenset({"entry", "target", "stop", "trail", "moc_fallback"})
+# Bracket legs have no lot concept (one parent, one target, one stop-or-trail child) —
+# a flat role name, not the lot{N}_<suffix> shape scale-out uses.
+_KNOWN_FLAT_ROLES = frozenset({"parent", "target", "stop", "trail"})
 
 
 def _parse_order_ref(order_ref: str) -> tuple[str, str] | None:
@@ -185,6 +265,8 @@ def _lot_index(role: str) -> int | None:
 
 
 def _is_known_role(role: str) -> bool:
+    if role in _KNOWN_FLAT_ROLES:
+        return True
     match = _LOT_ROLE_PATTERN.match(role)
     return match is not None and match.group(2) in _KNOWN_LOT_ROLE_SUFFIXES
 
@@ -278,7 +360,10 @@ def derive_package_warnings(
 
     # Active sell exposure vs. the current long position, respecting OCA grouping:
     # orders sharing one oca_group are alternatives for the same shares (only one
-    # can actually execute), so they count once — not once per leg.
+    # can actually execute), so they count once — not once per leg. Orders with no
+    # oca_group but a shared parent_id (a bracket's target + stop/trail child, which
+    # use TWS's native parent/child bracket linking instead of an OCA group) are the
+    # same kind of mutually-exclusive alternative, so they group the same way.
     position_by_conid = {p.conid: p.position for p in positions}
     sell_orders_by_conid: dict[int, list[OrderSnapshot]] = {}
     for order in open_orders:
@@ -292,8 +377,9 @@ def derive_package_warnings(
         grouped_max: dict[str, float] = {}
         ungrouped_total = 0.0
         for order in orders:
-            if order.oca_group:
-                grouped_max[order.oca_group] = max(grouped_max.get(order.oca_group, 0.0), order.quantity)
+            key = order.oca_group or (f"parent:{order.parent_id}" if order.parent_id is not None else None)
+            if key is not None:
+                grouped_max[key] = max(grouped_max.get(key, 0.0), order.quantity)
             else:
                 ungrouped_total += order.quantity
         exposure = sum(grouped_max.values()) + ungrouped_total
