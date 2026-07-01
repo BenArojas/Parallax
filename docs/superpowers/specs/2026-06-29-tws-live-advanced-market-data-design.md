@@ -121,6 +121,8 @@ Expected execution-plan slices:
 
 ## Mission 3: Market-Data Extras
 
+2026-07-02: kickoff tracked in `docs/superpowers/plans/2026-07-02-tws-market-data-extras.md`.
+
 Market-data extras stay read-only and use a TWS-owned stream, separate from the
 existing Client Portal `/ws`.
 
