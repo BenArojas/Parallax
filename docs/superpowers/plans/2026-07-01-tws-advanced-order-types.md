@@ -403,6 +403,18 @@ framing, not requested here).
   regex, so they fall through to `standaloneOrders` rather than being
   misclassified as a scale-out package — no scale-out grouping behavior
   added for brackets in this slice.
+- [x] **Follow-up (2026-07-01): brackets as their own Open Orders package.**
+  New `src/modules/tws-execution-assistant/bracketPackages.ts`
+  (`parseBracketOrderRef`/`groupBracketOrders`, one focused test) plus a
+  `BracketPackageRows` header banner (orange "Bracket" tag, distinct from
+  scale-out's purple "Scale-Out" tag) in
+  `TwsExecutionAssistantModule.tsx`. Unlike scale-out packages, bracket legs
+  keep normal per-leg Cancel/Modify — a bracket leg is still an independently
+  cancelable/modifiable order, so no "Manage package" read-only view was
+  added; this is purely a visual grouping/tagging change, no new mutation
+  behavior. `groupBracketOrders` takes plain orders + warnings (not a full
+  `ReconciliationSnapshot`) so it chains after `groupScaleOutOrders`'s
+  `standaloneOrders` without either grouping misclassifying the other kind.
 - [ ] Run:
 
 ```bash

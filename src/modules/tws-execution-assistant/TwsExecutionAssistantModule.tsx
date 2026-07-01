@@ -13,6 +13,7 @@ import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
 import { BracketBuilderPanel } from "./BracketBuilderPanel";
 import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
+import { groupBracketOrders, type BracketOrderPackage } from "./bracketPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
 
 const STATUS_KEY = ["tws-status"];
@@ -391,6 +392,44 @@ function ScaleOutPackageRows({
   );
 }
 
+/** A bracket's legs stay individually cancelable/modifiable (unlike a
+ * scale-out lot, canceling one bracket leg is a normal, self-contained
+ * action) — this just adds the same package header banner so the user can
+ * see at a glance that these rows are one linked bracket, not unrelated orders. */
+function BracketPackageRows({
+  pkg,
+  warnings,
+  onCancel,
+  onModify,
+}: {
+  pkg: BracketOrderPackage;
+  warnings: TwsPackageWarning[];
+  onCancel: (order_id: number) => void;
+  onModify: (order: OrderSnapshot) => void;
+}) {
+  return (
+    <>
+      <tr className="border-t border-border bg-[var(--glow-orange)]/40 text-xs">
+        <td colSpan={10} className="py-1.5 pr-3">
+          <span className="inline-flex items-center gap-2">
+            <span className="rounded bg-[var(--clr-orange)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--clr-orange)]">
+              Bracket
+            </span>
+            <span className="font-medium">{pkg.symbol}</span>
+            <span className="text-[var(--text-3)]">pkg {pkg.packageId.slice(0, 8)}</span>
+            {pkg.warnings.length > 0 && (
+              <span className="text-[var(--clr-orange)]">⚠ {pkg.warnings.length}</span>
+            )}
+          </span>
+        </td>
+      </tr>
+      {pkg.orders.map((order) => (
+        <OrderRow key={order.order_id} order={order} warnings={warnings} onCancel={onCancel} onModify={onModify} />
+      ))}
+    </>
+  );
+}
+
 type PlanMode = "standard" | "scale_out" | "bracket";
 
 export function TwsExecutionAssistantModule() {
@@ -424,9 +463,10 @@ export function TwsExecutionAssistantModule() {
     enabled: status?.connected === true,
   });
 
-  const { packages: scaleOutPackages, standaloneOrders } = recon
+  const { packages: scaleOutPackages, standaloneOrders: afterScaleOut } = recon
     ? groupScaleOutOrders(recon)
     : { packages: [] as ScaleOutOrderPackage[], standaloneOrders: [] as OrderSnapshot[] };
+  const { packages: bracketPackages, standaloneOrders } = groupBracketOrders(afterScaleOut, recon?.package_warnings ?? []);
   const managedScaleOutPackage = scaleOutPackages.find((p) => p.packageId === managedScaleOutPackageId) ?? null;
 
   const connectMutation = useMutation({
@@ -1659,6 +1699,21 @@ export function TwsExecutionAssistantModule() {
                           setAdvancedReject(null);
                           setEditingOrder(null);
                           setManagedScaleOutPackageId(pkg.packageId);
+                        }}
+                      />
+                    ))}
+                    {bracketPackages.map((pkg) => (
+                      <BracketPackageRows
+                        key={pkg.packageId}
+                        pkg={pkg}
+                        warnings={recon.package_warnings}
+                        onCancel={(id) => cancelOrderMutation.mutate(id)}
+                        onModify={(order) => {
+                          setPlanMode("standard");
+                          setEditingOrder(order);
+                          setModifyForm({ quantity: order.quantity, limit_price: order.lmt_price, stop_price: order.stop_price });
+                          setModifyReview(false);
+                          modifyOrderMutation.reset();
                         }}
                       />
                     ))}
