@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from routers.tws_stream import router as tws_stream_router
 from services.tws_broker_adapter import TwsBrokerAdapter
 
 
@@ -57,3 +61,45 @@ def test_get_quote_maps_10090_to_partial():
     assert result.error_code == 10090
     assert result.unavailable_reason == "Partial market data subscription — some fields may be missing."
     assert result.is_delayed is False
+
+
+class _StreamAdapterStub:
+    def __init__(self) -> None:
+        self.cleaned_up = False
+        self.last_request: dict[str, object] | None = None
+
+    def is_connected(self) -> bool:
+        return False
+
+    def stream_register_socket(self, websocket) -> None:
+        return None
+
+    async def stream_subscribe(self, websocket, req) -> None:
+        self.last_request = {"action": req.action, "channel": req.channel, "conid": req.conid, "timeframe": req.timeframe}
+
+    async def stream_unsubscribe(self, websocket, req) -> None:
+        self.last_request = {"action": req.action, "channel": req.channel, "conid": req.conid, "timeframe": req.timeframe}
+
+    def stream_cleanup(self, websocket) -> None:
+        self.cleaned_up = True
+
+
+def test_tws_stream_sends_initial_status_typed_error_and_cleans_up():
+    app = FastAPI()
+    adapter = _StreamAdapterStub()
+    app.state.tws_adapter = adapter
+    app.include_router(tws_stream_router)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/execution-assistant/ws") as websocket:
+            assert websocket.receive_json() == {
+                "type": "tws_stream_status",
+                "connected": False,
+            }
+
+            websocket.send_text("{bad json")
+            error = websocket.receive_json()
+            assert error["type"] == "tws_stream_error"
+            assert isinstance(error["message"], str)
+
+    assert adapter.cleaned_up is True

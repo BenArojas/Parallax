@@ -17,6 +17,7 @@ import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
+import { useTwsLiveStream } from "./useTwsLiveStream";
 
 const STATUS_KEY = ["tws-status"];
 export const RECON_KEY = ["tws-reconciliation"];
@@ -349,6 +350,7 @@ type PlanMode = "standard" | "scale_out" | "bracket" | "advanced";
 
 export function TwsExecutionAssistantModule() {
   const queryClient = useQueryClient();
+  const { streamConnected } = useTwsLiveStream();
   const [planMode, setPlanMode] = useState<PlanMode>("standard");
   const [sweeping, setSweeping] = useState(false);
   const [form, setForm] = useState<TwsConnectRequest>(TWS_CONNECT_DEFAULTS);
@@ -699,6 +701,16 @@ export function TwsExecutionAssistantModule() {
         </div>
         <div className="ml-auto flex items-center gap-3">
           <ThemeToggle />
+          <span
+            className={cn(
+              "hidden rounded px-1.5 py-0.5 text-[9px] font-semibold sm:inline-flex",
+              streamConnected
+                ? "bg-[var(--glow-green)] text-[var(--clr-green)]"
+                : "bg-[var(--bg-2)] text-[var(--text-3)]",
+            )}
+          >
+            Stream {streamConnected ? "connected" : "disconnected"}
+          </span>
           {connected ? (
             <>
               <span className="hidden items-center gap-1.5 text-[11px] font-semibold text-[var(--clr-green)] sm:flex">

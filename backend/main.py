@@ -475,6 +475,9 @@ app.include_router(orbit_session_router)
 from routers.execution_assistant import router as execution_assistant_router
 app.include_router(execution_assistant_router)
 
+from routers.tws_stream import router as tws_stream_router
+app.include_router(tws_stream_router)
+
 # Routers exposed for in-process reuse (the read-only MCP server + its tests).
 ALL_ROUTERS = [
     auth_router, indicators_router, market_router, sectors_router, watchlist_router,
@@ -482,7 +485,7 @@ ALL_ROUTERS = [
     gateway_router, watchlist_config_router, settings_router, pulse_config_router,
     health_router, instruments_router, drawings_router, moonmarket_router,
     orders_router, trading_safety_router, options_router, inflect_router, agent_router,
-    orbit_session_router, execution_assistant_router,
+    orbit_session_router, execution_assistant_router, tws_stream_router,
 ]
 
 

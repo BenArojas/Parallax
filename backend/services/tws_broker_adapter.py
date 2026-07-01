@@ -10,7 +10,9 @@ from datetime import date as date_, datetime, timezone
 
 from typing import TYPE_CHECKING
 
+from fastapi import WebSocket
 from ib_async import IB, Contract, Order, PriceCondition
+from starlette.websockets import WebSocketState
 
 from models.broker_session import BrokerSessionMode
 from models.tws_order_capabilities import can_modify_order_type
@@ -37,6 +39,8 @@ from models.tws_execution_assistant import (
     TwsOrderPackageLegSubmission,
     TwsOrderPackagePreview,
     TwsOrderPackageSubmission,
+    TwsStreamStatusEvent,
+    TwsStreamSubscribeRequest,
     TwsStatusResponse,
 )
 
@@ -166,6 +170,19 @@ class TwsBrokerAdapter:
         self._last_host: str = "127.0.0.1"
         self._connected_port: int | None = None
         self._kill_switch_active: bool = False
+        self._stream_subscriptions: dict[WebSocket, dict[int, set[str]]] = {}
+
+        async def _on_connected(*_args: object) -> None:
+            await self._broadcast_stream_status(True)
+
+        async def _on_disconnected(*_args: object) -> None:
+            await self._broadcast_stream_status(False)
+            self._clear_stream_registry()
+
+        self._stream_connected_handler = _on_connected
+        self._stream_disconnected_handler = _on_disconnected
+        self._ib.connectedEvent += self._stream_connected_handler
+        self._ib.disconnectedEvent += self._stream_disconnected_handler
 
     async def connect(self, host: str, port: int, client_id: int) -> None:
         # KNOWN GAP: no paper/live account-type check here. Paper is the default
@@ -232,6 +249,72 @@ class TwsBrokerAdapter:
             return None
         accounts = self._ib.managedAccounts()
         return accounts[0] if accounts else None
+
+    def stream_socket_is_open(self, websocket: WebSocket) -> bool:
+        return (
+            websocket.client_state == WebSocketState.CONNECTED
+            and websocket.application_state == WebSocketState.CONNECTED
+        )
+
+    def _stream_channel_key(self, req: TwsStreamSubscribeRequest) -> str:
+        if req.channel == "bars":
+            return f"bars:{req.timeframe or '5m'}"
+        return req.channel
+
+    def _stream_has_other_holder(self, websocket: WebSocket, conid: int, channel_key: str) -> bool:
+        for other_ws, conids in self._stream_subscriptions.items():
+            if other_ws is websocket:
+                continue
+            if channel_key in conids.get(conid, set()):
+                return True
+        return False
+
+    def stream_register_socket(self, websocket: WebSocket) -> None:
+        self._stream_subscriptions.setdefault(websocket, {})
+
+    async def stream_subscribe(self, websocket: WebSocket, req: TwsStreamSubscribeRequest) -> None:
+        conids = self._stream_subscriptions.setdefault(websocket, {})
+        channels = conids.setdefault(req.conid, set())
+        channels.add(self._stream_channel_key(req))
+
+    async def stream_unsubscribe(self, websocket: WebSocket, req: TwsStreamSubscribeRequest) -> None:
+        conids = self._stream_subscriptions.setdefault(websocket, {})
+        channels = conids.get(req.conid)
+        if not channels:
+            return
+        channel_key = self._stream_channel_key(req)
+        channels.discard(channel_key)
+        if not channels:
+            conids.pop(req.conid, None)
+        if not conids:
+            self._stream_subscriptions[websocket] = {}
+        if self._stream_has_other_holder(websocket, req.conid, channel_key):
+            return
+        # ponytail: Task 2 only tracks ownership for future cancel* calls; Task 3 wires broker cancels.
+
+    def stream_cleanup(self, websocket: WebSocket) -> None:
+        self._stream_subscriptions.pop(websocket, None)
+
+    def _clear_stream_registry(self) -> None:
+        self._stream_subscriptions = {
+            websocket: {}
+            for websocket in list(self._stream_subscriptions)
+            if self.stream_socket_is_open(websocket)
+        }
+
+    async def _broadcast_stream_status(self, connected: bool) -> None:
+        event = TwsStreamStatusEvent(connected=connected).model_dump()
+        dead: list[WebSocket] = []
+        for websocket in list(self._stream_subscriptions):
+            if not self.stream_socket_is_open(websocket):
+                dead.append(websocket)
+                continue
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                dead.append(websocket)
+        for websocket in dead:
+            self.stream_cleanup(websocket)
 
     async def check_api_server(self) -> bool:
         """Return True if the TWS / IB Gateway API socket is TCP-reachable.

@@ -18,6 +18,9 @@ export const API_BASE = `http://${SIDECAR_HOST}:${SIDECAR_PORT}`;
 /** WebSocket URL for live market data streaming */
 export const WS_URL = `ws://${SIDECAR_HOST}:${SIDECAR_PORT}/ws`;
 
+/** WebSocket URL for TWS Execution Assistant market-data control/status streaming */
+export const TWS_STREAM_URL = `ws://${SIDECAR_HOST}:${SIDECAR_PORT}/execution-assistant/ws`;
+
 /**
  * IBKR Client Portal Gateway base URL.
  * Port 5001 is the default — matches backend/config.py IBKR_GATEWAY_PORT.

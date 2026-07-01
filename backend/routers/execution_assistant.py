@@ -25,6 +25,7 @@ from models.tws_execution_assistant import (
     TwsOrderPackageSubmission,
     TwsOverrideRequest,
     TwsStatusResponse,
+    TWS_TIMEFRAMES,
 )
 from services.broker_session import BrokerSessionService
 from services.execution_plan import ExecutionPlanService
@@ -175,7 +176,7 @@ async def get_quote(
     return await adapter.get_quote(conid)
 
 
-_ALLOWED_TIMEFRAMES: frozenset[str] = frozenset({"1m", "5m", "15m", "30m", "4h", "1D", "1W"})
+_ALLOWED_TIMEFRAMES: frozenset[str] = frozenset(TWS_TIMEFRAMES)
 
 
 @router.get("/instruments/{conid}/bars", response_model=BarsResponse)

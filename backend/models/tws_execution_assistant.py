@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel
 
@@ -126,6 +126,9 @@ MarketDataType = Literal[
     "unavailable",
 ]
 
+TwsTimeframe = Literal["1m", "5m", "15m", "30m", "4h", "1D", "1W"]
+TWS_TIMEFRAMES: tuple[TwsTimeframe, ...] = get_args(TwsTimeframe)
+
 
 class PaperOrderPreview(BaseModel):
     plan_id: str
@@ -182,6 +185,27 @@ class BarsResponse(BaseModel):
     conid: int
     timeframe: str
     bars: list[BarSnapshot] = []
+
+
+TwsStreamAction = Literal["subscribe", "unsubscribe"]
+TwsStreamChannel = Literal["quote", "bars", "depth"]
+
+
+class TwsStreamSubscribeRequest(BaseModel):
+    action: TwsStreamAction
+    channel: TwsStreamChannel
+    conid: int
+    timeframe: TwsTimeframe | None = None
+
+
+class TwsStreamStatusEvent(BaseModel):
+    type: Literal["tws_stream_status"] = "tws_stream_status"
+    connected: bool
+
+
+class TwsStreamErrorEvent(BaseModel):
+    type: Literal["tws_stream_error"] = "tws_stream_error"
+    message: str
 
 
 class TwsOrderActionResult(BaseModel):
