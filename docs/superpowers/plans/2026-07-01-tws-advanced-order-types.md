@@ -501,6 +501,28 @@ crowded the header) and Open Orders identification. Added to the File Map:
   since success and fail-safe protect distinct promises per
   `docs/testing.md`): `test_trailing_stop_percent_preview_has_one_leg_with_final_transmit`
   and `test_loc_preview_rejects_missing_limit_price`.
+- [x] **Post-review fix (2026-07-01): reject extraneous price fields per GTD
+  order_type.** An independent code-review subagent found a Critical issue:
+  `_validate_gtd`'s TRAIL/TRAILLMT branch only checked that `trail` was
+  present — it never rejected a stray `stop_price` or `limit_price` also
+  being set, and `_gtd_leg` forwarded whatever was on the request
+  unconditionally. Reproduced live: a GTD TRAIL request carrying a stray
+  `stop_price` passed preview validation (200), and tracing that leg through
+  `place_order_package` showed the adapter would set both `order.auxPrice`
+  (from `stop_price`) and `order.trailingPercent` (from `trail`) on the same
+  broker order — violating the explicit requirement that percent trail and
+  `auxPrice` be mutually exclusive. Fixed by extending `_validate_gtd` to
+  reject any field not applicable to the selected order_type (mirroring the
+  "must not have X" discipline `_validate_moc` already applied to
+  `limit_price`), plus hardening `_gtd_leg` itself to only forward relevant
+  fields as defense-in-depth. Added one regression test,
+  `test_gtd_trail_rejects_stray_stop_price` (3 new tests total for this
+  slice — justified per `docs/testing.md`'s "a serious or repeated
+  regression gets one focused regression test," since this is a genuine
+  trust-boundary gap in the public preview endpoint, not a cosmetic issue).
+  Manually verified both reproduction cases from the review (stray
+  `stop_price` and stray `limit_price` on a GTD TRAIL request) are now
+  correctly rejected with 422.
 - [x] Frontend: `AdvancedOrderPanel.tsx` — symbol search (same pattern as
   Task 1/4), side/quantity, a compact in-panel kind selector (not a 4th+5th
   header toggle — kept the header to one "Advanced" segment per this task's

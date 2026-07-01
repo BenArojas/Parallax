@@ -257,6 +257,12 @@ _GTD_WORKING_ORDER_TYPES = frozenset({"LMT", "STP", "STP LMT", "TRAIL", "TRAILLM
 
 
 def _validate_gtd(req: TwsOrderPackageRequest) -> list[str]:
+    """Rejects any field not applicable to the selected order_type, not just missing
+    required ones — the same discipline _validate_moc already applies to limit_price.
+    Without this, a GTD TRAIL request carrying a stray stop_price or limit_price would
+    pass preview and reach the adapter, which sets auxPrice/lmtPrice unconditionally
+    whenever they're non-null — producing a broker order with both auxPrice and
+    trailingPercent set, violating the required mutual exclusivity between them."""
     errors: list[str] = []
     if req.quantity <= 0:
         errors.append("Quantity must be positive.")
@@ -268,33 +274,47 @@ def _validate_gtd(req: TwsOrderPackageRequest) -> list[str]:
         errors.append(f"GTD order_type must be one of {sorted(_GTD_WORKING_ORDER_TYPES)}.")
         return errors  # remaining checks assume a recognized order_type
 
-    if req.order_type == "LMT" and not (req.limit_price is not None and req.limit_price > 0):
-        errors.append("LMT GTD requires a positive limit_price.")
-    if req.order_type == "STP" and not (req.stop_price is not None and req.stop_price > 0):
-        errors.append("STP GTD requires a positive stop_price.")
-    if req.order_type == "STP LMT" and not (
-        req.limit_price is not None and req.limit_price > 0 and req.stop_price is not None and req.stop_price > 0
-    ):
-        errors.append("STP LMT GTD requires both a positive limit_price and stop_price.")
-    if req.order_type in ("TRAIL", "TRAILLMT"):
+    wants_limit = req.order_type in ("LMT", "STP LMT")
+    wants_stop = req.order_type in ("STP", "STP LMT")
+    wants_trail = req.order_type in ("TRAIL", "TRAILLMT")
+
+    if wants_limit and not (req.limit_price is not None and req.limit_price > 0):
+        errors.append(f"{req.order_type} GTD requires a positive limit_price.")
+    if not wants_limit and req.limit_price is not None:
+        errors.append(f"{req.order_type} GTD must not have a limit_price.")
+
+    if wants_stop and not (req.stop_price is not None and req.stop_price > 0):
+        errors.append(f"{req.order_type} GTD requires a positive stop_price.")
+    if not wants_stop and req.stop_price is not None:
+        errors.append(f"{req.order_type} GTD must not have a stop_price.")
+
+    if wants_trail:
         if req.trail is None:
             errors.append("A trail spec is required for a trailing GTD order.")
         else:
             errors.extend(_validate_trail_value("GTD trailing", req.trail))
         if req.order_type == "TRAILLMT" and not (req.limit_offset is not None and req.limit_offset > 0):
             errors.append("TRAILLMT GTD requires a positive limit_offset.")
+    elif req.trail is not None:
+        errors.append(f"{req.order_type} GTD must not have a trail.")
+
     return errors
 
 
 def _gtd_leg(req: TwsOrderPackageRequest) -> list[TwsOrderLegPreview]:
+    # Only forward fields the validated order_type actually uses — belt-and-suspenders
+    # against the adapter ever seeing a conflicting field pair (see _validate_gtd).
+    wants_limit = req.order_type in ("LMT", "STP LMT")
+    wants_stop = req.order_type in ("STP", "STP LMT")
+    wants_trail = req.order_type in ("TRAIL", "TRAILLMT")
     return [TwsOrderLegPreview(
         role="gtd",
         side=req.side,
         quantity=req.quantity,
         order_type=req.order_type,
-        limit_price=req.limit_price,
-        stop_price=req.stop_price,
-        trail=req.trail,
+        limit_price=req.limit_price if wants_limit else None,
+        stop_price=req.stop_price if wants_stop else None,
+        trail=req.trail if wants_trail else None,
         limit_offset=req.limit_offset if req.order_type == "TRAILLMT" else None,
         tif="GTD",
         good_till_date=req.good_till_date,

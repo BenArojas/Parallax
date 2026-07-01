@@ -289,3 +289,30 @@ def test_loc_preview_rejects_missing_limit_price():
     assert r.status_code == 422
     assert r.json()["detail"]["error"] == "invalid_order_package"
     assert any("positive limit_price" in e for e in r.json()["detail"]["errors"])
+
+
+def test_gtd_trail_rejects_stray_stop_price():
+    """Regression test: a percent-trail GTD order carrying an unrelated stop_price
+    must be rejected at the trust boundary. Without this check it would pass preview
+    and reach the adapter, which sets order.auxPrice from stop_price and
+    order.trailingPercent from trail unconditionally whenever each is non-null —
+    producing a broker order with both set, violating their required mutual
+    exclusivity."""
+    client = _client()
+    req = {
+        "kind": "gtd",
+        "conid": 270639,
+        "symbol": "INTC",
+        "side": "SELL",
+        "quantity": 50,
+        "order_type": "TRAIL",
+        "trail": {"mode": "percent", "value": 5},
+        "stop_price": 12.34,
+        "good_till_date": "20260801 16:00:00",
+    }
+
+    r = client.post("/execution-assistant/order-packages/preview", json=req)
+
+    assert r.status_code == 422
+    assert r.json()["detail"]["error"] == "invalid_order_package"
+    assert any("must not have a stop_price" in e for e in r.json()["detail"]["errors"])
