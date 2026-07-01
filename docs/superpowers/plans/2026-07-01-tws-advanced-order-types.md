@@ -324,6 +324,13 @@ git add backend/models/tws_execution_assistant.py backend/services/tws_broker_ad
 git commit -m "feat: expose tws package reconciliation fields"
 ```
 
+**Scale-Out Cockpit V2 interlude (2026-07-01):** before Task 4 brackets, the
+approved next slice is the Scale-Out Cockpit V2 upgrade — symbol search for
+scale-out instruments, a compact scenario calculator, and read-only package
+grouping in Open Orders. Design:
+`docs/superpowers/specs/2026-07-01-scale-out-cockpit-v2-design.md`. Plan:
+`docs/superpowers/plans/2026-07-01-scale-out-cockpit-v2.md`.
+
 ### Task 4: Add Bracket Packages
 
 **Files:**
