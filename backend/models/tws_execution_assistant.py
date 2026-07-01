@@ -203,6 +203,21 @@ class TwsStreamStatusEvent(BaseModel):
     connected: bool
 
 
+class TwsQuoteStreamEvent(BaseModel):
+    type: Literal["tws_quote"] = "tws_quote"
+    conid: int
+    last: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+    bid_size: float | None = None
+    ask_size: float | None = None
+    high: float | None = None
+    low: float | None = None
+    volume: float | None = None
+    entitlement: MarketDataType = "unknown"
+    unavailable_reason: str | None = None
+
+
 class TwsStreamErrorEvent(BaseModel):
     type: Literal["tws_stream_error"] = "tws_stream_error"
     message: str

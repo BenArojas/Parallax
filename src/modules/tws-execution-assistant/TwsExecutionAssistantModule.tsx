@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, LockKeyhole, Power, Search } from "lucide-react";
 import { BackToOrbitButton } from "@/components/ui/BackToOrbitButton";
@@ -17,6 +17,7 @@ import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
 import { TwsCandleChart } from "./TwsCandleChart";
+import { useTwsLiveQuote } from "./useTwsLiveQuote";
 import { useTwsLiveStream } from "./useTwsLiveStream";
 
 const STATUS_KEY = ["tws-status"];
@@ -607,6 +608,21 @@ export function TwsExecutionAssistantModule() {
     staleTime: 15000,
     refetchInterval: 30000,
   });
+  const liveQuote = useTwsLiveQuote(planForm.conid);
+  const displayedQuote = useMemo(() => {
+    if (!quote || !liveQuote) return quote;
+    return {
+      ...quote,
+      last: liveQuote.last ?? quote.last,
+      bid: liveQuote.bid ?? quote.bid,
+      ask: liveQuote.ask ?? quote.ask,
+      high: liveQuote.high ?? quote.high,
+      low: liveQuote.low ?? quote.low,
+      market_data_type: liveQuote.entitlement,
+      is_delayed: liveQuote.entitlement === "delayed" || liveQuote.entitlement === "delayed_frozen",
+      unavailable_reason: liveQuote.unavailable_reason,
+    };
+  }, [liveQuote, quote]);
 
   const { data: barsData, isLoading: barsLoading } = useQuery({
     queryKey: ["tws-bars", planForm.conid, activeTimeframe],
@@ -1581,7 +1597,7 @@ export function TwsExecutionAssistantModule() {
                 </div>
               </div>
               {planForm.conid > 0 && connected && (
-                <QuoteStrip quote={quote} exchange={selectedExchange} loading={quoteLoading} />
+            <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
               )}
               <div className="flex flex-1 p-3">
                 <div className="flex flex-1 overflow-hidden rounded border border-border/60 bg-[var(--bg-0)]">

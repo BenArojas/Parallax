@@ -39,6 +39,7 @@ from models.tws_execution_assistant import (
     TwsOrderPackageLegSubmission,
     TwsOrderPackagePreview,
     TwsOrderPackageSubmission,
+    TwsQuoteStreamEvent,
     TwsStreamStatusEvent,
     TwsStreamSubscribeRequest,
     TwsStatusResponse,
@@ -171,6 +172,7 @@ class TwsBrokerAdapter:
         self._connected_port: int | None = None
         self._kill_switch_active: bool = False
         self._stream_subscriptions: dict[WebSocket, dict[int, set[str]]] = {}
+        self._quote_streams: dict[int, dict[str, object]] = {}
 
         async def _on_connected(*_args: object) -> None:
             await self._broadcast_stream_status(True)
@@ -276,31 +278,158 @@ class TwsBrokerAdapter:
         conids = self._stream_subscriptions.setdefault(websocket, {})
         channels = conids.setdefault(req.conid, set())
         channels.add(self._stream_channel_key(req))
+        if req.channel == "quote":
+            await self.subscribe_quote(websocket, req.conid)
 
     async def stream_unsubscribe(self, websocket: WebSocket, req: TwsStreamSubscribeRequest) -> None:
-        conids = self._stream_subscriptions.setdefault(websocket, {})
-        channels = conids.get(req.conid)
-        if not channels:
-            return
         channel_key = self._stream_channel_key(req)
-        channels.discard(channel_key)
-        if not channels:
-            conids.pop(req.conid, None)
-        if not conids:
-            self._stream_subscriptions[websocket] = {}
-        if self._stream_has_other_holder(websocket, req.conid, channel_key):
+        if req.channel == "quote":
+            self.unsubscribe_quote(websocket, req.conid)
             return
-        # ponytail: Task 2 only tracks ownership for future cancel* calls; Task 3 wires broker cancels.
+        self._remove_stream_ownership(websocket, req.conid, channel_key)
 
     def stream_cleanup(self, websocket: WebSocket) -> None:
+        subscriptions = copy.deepcopy(self._stream_subscriptions.get(websocket, {}))
+        for conid, channels in subscriptions.items():
+            for channel_key in list(channels):
+                if channel_key == "quote":
+                    self.unsubscribe_quote(websocket, conid)
+                else:
+                    self._remove_stream_ownership(websocket, conid, channel_key)
         self._stream_subscriptions.pop(websocket, None)
 
     def _clear_stream_registry(self) -> None:
+        for state in self._quote_streams.values():
+            state["ticker"].updateEvent -= state["update_handler"]
+            self._ib.errorEvent -= state["error_handler"]
         self._stream_subscriptions = {
             websocket: {}
             for websocket in list(self._stream_subscriptions)
             if self.stream_socket_is_open(websocket)
         }
+        self._quote_streams = {}
+
+    def _remove_stream_ownership(self, websocket: WebSocket, conid: int, channel_key: str) -> None:
+        conids = self._stream_subscriptions.setdefault(websocket, {})
+        channels = conids.get(conid)
+        if not channels:
+            return
+        channels.discard(channel_key)
+        if not channels:
+            conids.pop(conid, None)
+        if not conids:
+            self._stream_subscriptions[websocket] = {}
+
+    def _quote_event_payload(
+        self, conid: int, ticker: object, captured_errors: list[int],
+    ) -> TwsQuoteStreamEvent:
+        last = _quote_val(getattr(ticker, "last", None))
+        bid = _quote_val(getattr(ticker, "bid", None))
+        ask = _quote_val(getattr(ticker, "ask", None))
+        bid_size = _quote_val(getattr(ticker, "bidSize", None))
+        ask_size = _quote_val(getattr(ticker, "askSize", None))
+        high = _quote_val(getattr(ticker, "high", None))
+        low = _quote_val(getattr(ticker, "low", None))
+        volume = _quote_val(getattr(ticker, "volume", None))
+        vals = (last, bid, ask, bid_size, ask_size, high, low, volume)
+        if any(v is not None for v in vals):
+            entitlement = _MDT_MAP.get(getattr(ticker, "marketDataType", 0) or 0, "unknown")
+            return TwsQuoteStreamEvent(
+                conid=conid,
+                last=last,
+                bid=bid,
+                ask=ask,
+                bid_size=bid_size,
+                ask_size=ask_size,
+                high=high,
+                low=low,
+                volume=volume,
+                entitlement=entitlement,
+            )
+
+        error_code = next((code for code in captured_errors if code in _EXPECTED_MDT_ERRORS), None)
+        entitlement, unavailable_reason = self._classify_entitlement(
+            getattr(ticker, "marketDataType", None), error_code,
+        )
+        return TwsQuoteStreamEvent(
+            conid=conid,
+            last=last,
+            bid=bid,
+            ask=ask,
+            bid_size=bid_size,
+            ask_size=ask_size,
+            high=high,
+            low=low,
+            volume=volume,
+            entitlement=entitlement if error_code is not None else "unavailable",
+            unavailable_reason=unavailable_reason if error_code is not None else "Market data unavailable.",
+        )
+
+    async def _broadcast_quote_event(self, conid: int) -> None:
+        state = self._quote_streams.get(conid)
+        if not state:
+            return
+        event = self._quote_event_payload(
+            conid,
+            state["ticker"],
+            state["captured_errors"],  # type: ignore[arg-type]
+        ).model_dump()
+        dead: list[WebSocket] = []
+        for websocket, conids in list(self._stream_subscriptions.items()):
+            if "quote" not in conids.get(conid, set()):
+                continue
+            if not self.stream_socket_is_open(websocket):
+                dead.append(websocket)
+                continue
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                dead.append(websocket)
+        for websocket in dead:
+            self.stream_cleanup(websocket)
+
+    async def subscribe_quote(self, websocket: WebSocket, conid: int) -> None:
+        state = self._quote_streams.get(conid)
+        if state:
+            return
+
+        self._ib.reqMarketDataType(4)
+        contract = Contract(conId=conid, exchange="SMART", currency="USD", secType="STK")
+        ticker = self._ib.reqMktData(contract, snapshot=False)
+        captured_errors: list[int] = []
+
+        def _on_error(_req_id: int, code: int, _msg: str, contract_arg: object) -> None:
+            if getattr(contract_arg, "conId", None) == conid and code in _EXPECTED_MDT_ERRORS:
+                captured_errors.append(code)
+
+        def _on_update(*_args: object) -> None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(self._broadcast_quote_event(conid))
+
+        self._ib.errorEvent += _on_error
+        ticker.updateEvent += _on_update
+        self._quote_streams[conid] = {
+            "contract": contract,
+            "ticker": ticker,
+            "error_handler": _on_error,
+            "update_handler": _on_update,
+            "captured_errors": captured_errors,
+        }
+
+    def unsubscribe_quote(self, websocket: WebSocket, conid: int) -> None:
+        self._remove_stream_ownership(websocket, conid, "quote")
+        if self._stream_has_other_holder(websocket, conid, "quote"):
+            return
+        state = self._quote_streams.pop(conid, None)
+        if not state:
+            return
+        ticker = state["ticker"]
+        ticker.updateEvent -= state["update_handler"]
+        self._ib.errorEvent -= state["error_handler"]
+        self._ib.cancelMktData(state["contract"])
 
     async def _broadcast_stream_status(self, connected: bool) -> None:
         event = TwsStreamStatusEvent(connected=connected).model_dump()

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketState
 
+from models.tws_execution_assistant import TwsStreamSubscribeRequest
 from routers.tws_stream import router as tws_stream_router
 from services.tws_broker_adapter import TwsBrokerAdapter
 
@@ -61,6 +64,85 @@ def test_get_quote_maps_10090_to_partial():
     assert result.error_code == 10090
     assert result.unavailable_reason == "Partial market data subscription — some fields may be missing."
     assert result.is_delayed is False
+
+
+def test_stream_quote_prefers_ticker_data_over_10089_warning():
+    class _FakeTicker:
+        def __init__(self, contract: object) -> None:
+            self.contract = contract
+            self.updateEvent = _CallableEvent()
+            self.last = None
+            self.bid = None
+            self.ask = None
+            self.bidSize = None
+            self.askSize = None
+            self.high = None
+            self.low = None
+            self.volume = None
+            self.marketDataType = 0
+
+    class _FakeIB:
+        def __init__(self) -> None:
+            self.errorEvent = _CallableEvent()
+            self.tickers: dict[int, _FakeTicker] = {}
+
+        def isConnected(self) -> bool:
+            return True
+
+        def reqMarketDataType(self, _mdt: int) -> None:
+            pass
+
+        def reqMktData(self, contract: object, snapshot: bool = False):
+            assert snapshot is False
+            ticker = _FakeTicker(contract)
+            self.tickers[contract.conId] = ticker
+            return ticker
+
+        def cancelMktData(self, _contract: object) -> None:
+            pass
+
+    class _WebSocketStub:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+            self.client_state = WebSocketState.CONNECTED
+            self.application_state = WebSocketState.CONNECTED
+
+        async def send_json(self, payload: dict[str, object]) -> None:
+            self.sent.append(payload)
+
+    adapter = TwsBrokerAdapter()
+    adapter._ib = _FakeIB()  # type: ignore[assignment]
+    adapter._state = "connected"
+    websocket = _WebSocketStub()
+
+    async def _exercise() -> None:
+        await adapter.stream_subscribe(
+            websocket,  # type: ignore[arg-type]
+            TwsStreamSubscribeRequest(action="subscribe", channel="quote", conid=123),
+        )
+        adapter._ib.errorEvent.emit(1, 10089, "warning", SimpleNamespace(conId=123))
+        ticker = adapter._ib.tickers[123]
+        ticker.last = 101.25
+        ticker.marketDataType = 3
+        ticker.updateEvent.emit(ticker)
+        await asyncio.sleep(0)
+
+        await adapter.stream_subscribe(
+            websocket,  # type: ignore[arg-type]
+            TwsStreamSubscribeRequest(action="subscribe", channel="quote", conid=456),
+        )
+        adapter._ib.errorEvent.emit(2, 10089, "warning", SimpleNamespace(conId=456))
+        adapter._ib.tickers[456].updateEvent.emit(adapter._ib.tickers[456])
+        await asyncio.sleep(0)
+
+    asyncio.run(_exercise())
+
+    assert websocket.sent[0]["conid"] == 123
+    assert websocket.sent[0]["entitlement"] == "delayed"
+    assert websocket.sent[0]["unavailable_reason"] is None
+    assert websocket.sent[1]["conid"] == 456
+    assert websocket.sent[1]["entitlement"] == "unavailable"
+    assert websocket.sent[1]["unavailable_reason"] == "API market data subscription required; delayed market data may be available."
 
 
 class _StreamAdapterStub:

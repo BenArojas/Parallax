@@ -209,6 +209,21 @@ export interface QuoteSnapshot {
   error_code: number | null;
 }
 
+export interface TwsQuoteStreamEvent {
+  type: "tws_quote";
+  conid: number;
+  last: number | null;
+  bid: number | null;
+  ask: number | null;
+  bid_size: number | null;
+  ask_size: number | null;
+  high: number | null;
+  low: number | null;
+  volume: number | null;
+  entitlement: MarketDataType;
+  unavailable_reason: string | null;
+}
+
 export const TWS_TIMEFRAMES = ["1m", "5m", "15m", "30m", "4h", "1D", "1W"] as const;
 export type TwsTimeframe = (typeof TWS_TIMEFRAMES)[number];
 
