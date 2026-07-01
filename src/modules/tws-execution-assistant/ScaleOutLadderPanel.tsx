@@ -13,6 +13,8 @@ import {
   type TwsScaleOutLotDraft,
 } from "./api";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
+import { ScaleOutScenarioCalculator } from "./ScaleOutScenarioCalculator";
+import type { ScaleOutScenarioLot } from "./scaleOutScenario";
 
 interface LotInput {
   quantity: string;
@@ -38,7 +40,7 @@ const EXAMPLE = {
 
 const LOT_BAR_COLORS = ["bg-[var(--clr-cyan)]", "bg-[var(--clr-green)]", "bg-[var(--clr-purple)]", "bg-[var(--clr-orange)]"];
 
-function Hint({ text }: { text: string }) {
+export function Hint({ text }: { text: string }) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -217,6 +219,13 @@ export function ScaleOutLadderPanel({
 
   const req = buildRequest(conid, symbol, orderType, limitPrice, lots);
   const totalQty = lots.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0);
+  const entryPrice = orderType === "LMT" ? Number(limitPrice) || null : null;
+  const scenarioLots: ScaleOutScenarioLot[] = lots.map((l) => ({
+    quantity: Number(l.quantity) || 0,
+    targetPrice: Number(l.target_price) || 0,
+    stopPrice: l.use_trail ? null : Number(l.stop_price) || null,
+    trailAmount: l.use_trail ? Number(l.trail_value) || null : null,
+  }));
 
   if (preview) {
     return (
@@ -524,6 +533,8 @@ export function ScaleOutLadderPanel({
             <span>{lots.length} {lots.length === 1 ? "lot" : "lots"}</span>
           </div>
         )}
+
+        <ScaleOutScenarioCalculator entryPrice={entryPrice} lots={scenarioLots} />
       </div>
 
       <div className="shrink-0 flex flex-wrap items-center gap-3 pt-2">
