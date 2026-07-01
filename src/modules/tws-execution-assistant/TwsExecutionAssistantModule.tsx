@@ -6,7 +6,8 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { BROKER_SESSION_KEY } from "@/context/BrokerSessionContext";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
-import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsPackageWarning, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
 import { TwsCandleChart } from "./TwsCandleChart";
@@ -216,14 +217,17 @@ function UnmanagedBadge() {
 
 function OrderRow({
   order,
+  warnings,
   onCancel,
   onModify,
 }: {
   order: OrderSnapshot;
+  warnings: TwsPackageWarning[];
   onCancel: (order_id: number) => void;
   onModify: (order: OrderSnapshot) => void;
 }) {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const rowWarnings = warnings.filter((w) => w.order_ids.includes(order.order_id));
   const priceDisplay = (() => {
     if (order.lmt_price != null && order.stop_price != null)
       return `STP ${order.stop_price.toFixed(2)} / LMT ${order.lmt_price.toFixed(2)}`;
@@ -233,7 +237,29 @@ function OrderRow({
   })();
   return (
     <tr className={cn("border-t border-border text-xs transition-colors", confirmingCancel && "bg-[var(--clr-red)]/5")}>
-      <td className="py-1.5 pr-3 font-medium">{order.symbol}</td>
+      <td className="py-1.5 pr-3 font-medium">
+        <span className="inline-flex items-center gap-1.5">
+          {order.symbol}
+          {rowWarnings.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="cursor-help text-[var(--clr-orange)]" aria-label="Package warning">
+                    ⚠
+                  </span>
+                }
+              />
+              <TooltipContent>
+                <div className="space-y-1">
+                  {rowWarnings.map((w, i) => (
+                    <p key={i}>{w.message}</p>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </span>
+      </td>
       <td className={`pr-3 ${order.side === "BUY" ? "text-[var(--clr-green)]" : "text-[var(--clr-red)]"}`}>
         {order.side}
       </td>
@@ -1493,13 +1519,6 @@ export function TwsExecutionAssistantModule() {
                     {recon.unmanaged_order_count} unmanaged
                   </p>
                 )}
-                {recon.package_warnings.length > 0 && (
-                  <div className="mb-2 space-y-1">
-                    {recon.package_warnings.map((w, i) => (
-                      <p key={i} className="text-xs text-[var(--clr-orange)]">⚠ {w.message}</p>
-                    ))}
-                  </div>
-                )}
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="text-xs text-[var(--text-3)]">
@@ -1518,6 +1537,7 @@ export function TwsExecutionAssistantModule() {
                       <OrderRow
                         key={o.order_id}
                         order={o}
+                        warnings={recon.package_warnings}
                         onCancel={(id) => cancelOrderMutation.mutate(id)}
                         onModify={(order) => {
                           // Modify applies to any individual order by order_id (package-agnostic),
