@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Search } from "lucide-react";
 import { ApiError } from "@/lib/sidecarClient";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   twsApi,
+  type InstrumentResult,
   type TwsOrderPackagePreview,
   type TwsOrderPackageRequest,
   type TwsOrderPackageSubmission,
@@ -130,18 +132,56 @@ function lotReadout(lot: LotInput): string | null {
 export function ScaleOutLadderPanel({
   canDraft,
   isLiveSession,
+  connected,
+  onInstrumentResolved,
 }: {
   canDraft: boolean;
   isLiveSession: boolean;
+  connected: boolean;
+  onInstrumentResolved: (instrument: InstrumentResult) => void;
 }) {
   const queryClient = useQueryClient();
   const [conid, setConid] = useState(0);
   const [symbol, setSymbol] = useState("");
+  const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [orderType, setOrderType] = useState<"MKT" | "LMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [lots, setLots] = useState<LotInput[]>([{ ...EMPTY_LOT }, { ...EMPTY_LOT }]);
   const [preview, setPreview] = useState<TwsOrderPackagePreview | null>(null);
   const [submission, setSubmission] = useState<TwsOrderPackageSubmission | null>(null);
+
+  const searchMutation = useMutation({
+    mutationFn: (sym: string) => twsApi.searchInstruments(sym),
+    onSuccess: (results) => {
+      setSearchResults(results);
+      const stk = results.filter(
+        (r) => r.sec_type === "STK" && r.exchange === "SMART" && r.currency === "USD",
+      );
+      if (stk.length === 1) {
+        setSymbol(stk[0].symbol);
+        setConid(stk[0].conid);
+        onInstrumentResolved(stk[0]);
+        setSearchResults([]);
+      }
+    },
+  });
+
+  function runSearch() {
+    if (symbol && connected) searchMutation.mutate(symbol);
+  }
+
+  function handleSymbolChange(value: string) {
+    setSymbol(value.toUpperCase());
+    setConid(0);
+    setSearchResults([]);
+  }
+
+  function resolveInstrument(r: InstrumentResult) {
+    setSymbol(r.symbol);
+    setConid(r.conid);
+    onInstrumentResolved(r);
+    setSearchResults([]);
+  }
 
   const previewMutation = useMutation({
     mutationFn: (req: TwsOrderPackageRequest) => twsApi.previewOrderPackage(req),
@@ -295,24 +335,48 @@ export function ScaleOutLadderPanel({
         </button>
 
         <div className="grid gap-3 md:grid-cols-4">
-          <label className="space-y-1.5">
+          <label className="space-y-1.5 md:col-span-2">
             <span className="text-xs font-medium text-[var(--text-2)]">Symbol</span>
-            <input
-              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm uppercase outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-              value={symbol}
-              disabled={!canDraft}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-[var(--text-2)]">ConID</span>
-            <input
-              type="number"
-              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-              value={conid || ""}
-              disabled={!canDraft}
-              onChange={(e) => setConid(Number(e.target.value))}
-            />
+            <div className="relative">
+              <input
+                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 pr-9 text-sm uppercase outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
+                placeholder="e.g. INTC"
+                value={symbol}
+                disabled={!canDraft}
+                onChange={(e) => handleSymbolChange(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+              />
+              <button
+                type="button"
+                className="absolute right-2.5 top-2.5 text-[var(--text-3)] hover:text-[var(--clr-purple)] disabled:cursor-not-allowed"
+                disabled={!canDraft || !symbol || searchMutation.isPending}
+                onClick={runSearch}
+                tabIndex={-1}
+              >
+                <Search className="h-4 w-4" strokeWidth={1.7} />
+              </button>
+            </div>
+            {searchResults.length > 1 && (
+              <ul className="mt-0.5 rounded border border-border bg-[var(--bg-0)] shadow-md">
+                {searchResults.map((r) => (
+                  <li key={r.conid}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-[var(--bg-1)]"
+                      onClick={() => resolveInstrument(r)}
+                    >
+                      <span className="font-medium">{r.symbol}</span>
+                      <span className="text-[var(--text-3)]">
+                        {r.sec_type} · {r.primary_exchange || r.exchange} · {r.currency}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {conid > 0 && searchResults.length === 0 && (
+              <span className="text-[10px] text-[var(--text-3)]">conid {conid}</span>
+            )}
           </label>
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-[var(--text-2)]">Entry type</span>
@@ -345,7 +409,7 @@ export function ScaleOutLadderPanel({
           {lots.map((lot, i) => {
             const readout = lotReadout(lot);
             return (
-              <div key={i} className="rounded-md border border-border/70 bg-[var(--bg-0)] p-3">
+              <div key={i} className="border-b border-border/40 pb-3 last:border-b-0 last:pb-0">
                 <div className="flex flex-wrap items-end gap-3">
                   <span
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold"

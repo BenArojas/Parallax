@@ -1228,7 +1228,15 @@ export function TwsExecutionAssistantModule() {
 
                 </div>
               ) : planMode === "scale_out" ? (
-                <ScaleOutLadderPanel canDraft={canDraft} isLiveSession={isLiveSession} />
+                <ScaleOutLadderPanel
+                  canDraft={canDraft}
+                  isLiveSession={isLiveSession}
+                  connected={status?.connected === true}
+                  onInstrumentResolved={(instrument) => {
+                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
+                    setSelectedExchange(instrument.primary_exchange);
+                  }}
+                />
               ) : (
                 <div className="relative flex h-full flex-col">
                   <div className={cn("flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pb-2", !canDraft && "opacity-45")}>
