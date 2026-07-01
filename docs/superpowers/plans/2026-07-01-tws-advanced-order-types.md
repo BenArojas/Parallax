@@ -635,7 +635,7 @@ above, preview SELL LMT below, and that the Advanced panel with 5 kind
 buttons ("Trailing Stop"/"Good-Till-Date"/"Market-on-Close"/"Limit-on-Close"/
 "Price Condition") stays readable rather than cramped.
 
-### Task 7: Cockpit Package Review UI
+### Task 7: Cockpit Package Review UI — DONE (2026-07-01)
 
 **Files:**
 - Modify: `src/modules/tws-execution-assistant/api.ts`
@@ -644,45 +644,39 @@ buttons ("Trailing Stop"/"Good-Till-Date"/"Market-on-Close"/"Limit-on-Close"/
 **Interfaces:**
 - Consumes backend package request, preview, and submission contracts.
 
-**Superseded 2026-07-01:** scale-out's cockpit slice already shipped in Task 2.5,
-via a Standard/Scale-Out toggle merged into the Execution Plan panel rather than
-a free-standing "advanced-order mode." That pattern — and the full rationale
-for the toggle mechanism, copy voice, tooltip scope, and lot-card layout — is
-documented in `docs/superpowers/specs/2026-07-01-scale-out-cockpit-ux-design.md`.
-**Extend that pattern for the remaining kinds; do not design a separate UI
-paradigm per kind.** Concretely: the toggle likely grows from 2 options to N
-(one per implemented kind, or a kind dropdown once N gets large), each kind
-reuses the same intro-blurb / tooltip / live-readout / preview-table
-conventions already built for scale-out. Brainstorm any new toggle-shape
-decision the same way scale-out's was (visual companion, get approval) rather
-than guessing — this is still a user-facing design question, not a pure
-implementation one.
+**Delivered incrementally, not as a standalone task.** The originally-planned
+"Superseded" note undersold this — by the time Task 6 shipped, every item on
+this task's checklist was already satisfied by the Task 2.5/4/5/6 work:
 
-- [ ] Add TypeScript package request/preview/submission types for the new kinds (`TwsOrderPackageRequest` etc. already exist from Task 2.5 — extend, don't duplicate).
-- [ ] Add `twsApi` calls for any new endpoints the new kinds need (none expected — `previewOrderPackage`/`placePaperOrderPackage`/`placeLiveOrderPackage` already exist and are kind-agnostic).
-- [ ] Extend the existing toggle/builder pattern to cover:
-  - bracket.
-  - trailing stop fixed/percent.
-  - good-till-date.
-  - market-on-close.
-  - limit-on-close.
-  - price condition.
-- [ ] Preview legs already show role, side, quantity, order type, prices, trail, parent, OCA group, and transmit flag (built in Task 2.5) — confirm this still reads correctly for each new kind's leg shape, don't rebuild it.
-- [ ] Submit already routes to paper/live package endpoints using existing live-session state (built in Task 2.5) — no new routing needed unless a kind's UX requires it.
-- [ ] Run:
+- [x] TypeScript package request/preview/submission types cover every kind
+  (`TwsOrderPackageRequest`/`TwsOrderLegPreview`/`TwsOrderPackagePreview`/
+  `TwsOrderPackageSubmission` in `api.ts`) — extended, never duplicated.
+- [x] No new endpoints were ever needed — `previewOrderPackage`/
+  `placePaperOrderPackage`/`placeLiveOrderPackage` stayed kind-agnostic
+  through all six kinds.
+- [x] Toggle/builder pattern extended to cover all of it: `ScaleOutLadderPanel`,
+  `BracketBuilderPanel`, and one shared `AdvancedOrderPanel` (kind selector
+  inside the panel for trailing stop/GTD/MOC/LOC/price condition, rather than
+  a 6th-9th separate header toggle segment — kept the Execution Plan header
+  to 4 segments: Standard/Scale-Out/Bracket/Advanced).
+- [x] Preview leg table (role/side/qty/type/price/parent/OCA/transmit, plus a
+  TIF column for GTD, plus a plain-English summary line for price_condition)
+  reads correctly for every kind's leg shape — confirmed by manual smoke
+  (2026-07-01), not rebuilt.
+- [x] Submit routes through the same paper/live package endpoints and
+  existing live-session gate for every kind — no new routing added.
+- [x] Run:
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] Commit:
+- [x] Commit: folded into each kind's own commit (`3fcd220` bracket,
+  `ef4799f` trailing/GTD/MOC/LOC, `1c6dfeb` price condition) rather than one
+  separate "cockpit flow" commit, since the UI shipped alongside its backend
+  slice each time, not after.
 
-```bash
-git add src/modules/tws-execution-assistant/api.ts src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx
-git commit -m "feat: add tws advanced order cockpit flow"
-```
-
-### Task 8: Roadmap, Smoke Notes, And Merge-Gate Verification
+### Task 8: Roadmap, Smoke Notes, And Merge-Gate Verification — DONE (2026-07-01)
 
 **Files:**
 - Modify: `PROJECT_PLAN.md`
@@ -690,8 +684,8 @@ git commit -m "feat: add tws advanced order cockpit flow"
 **Interfaces:**
 - No new runtime interface.
 
-- [ ] Update `PROJECT_PLAN.md` to say Mission 2 is code-complete and awaiting review/smoke.
-- [ ] Run focused backend and frontend checks:
+- [x] `PROJECT_PLAN.md` updated: Mission 2 (Advanced order types) marked DONE.
+- [x] Ran focused backend and frontend checks:
 
 ```bash
 cd backend && uv run python -m pytest tests/test_execution_assistant_advanced_orders.py tests/test_execution_assistant_live_policy.py tests/test_execution_assistant_reconciliation.py -q
@@ -699,15 +693,14 @@ npm run typecheck
 git diff --check
 ```
 
-- [ ] Manual smoke with human present:
-  - paper preview scale-out.
-  - paper submit a tiny scale-out package if acceptable.
-  - paper preview bracket and percent trailing stop.
-  - live preview only unless the human explicitly approves a live order mutation.
-- [ ] Commit:
+  Result: 23 passed, typecheck clean, git diff --check clean.
+- [x] **Manual smoke: PASSED (2026-07-01)** — user confirmed testing against
+  the live paper app, covering scale-out, bracket, and the Advanced kinds
+  (trailing stop, GTD, MOC, LOC, price condition).
+- [x] Commit:
 
 ```bash
-git add PROJECT_PLAN.md
+git add PROJECT_PLAN.md docs/superpowers/plans/2026-07-01-tws-advanced-order-types.md
 git commit -m "docs: update tws advanced order status"
 ```
 
