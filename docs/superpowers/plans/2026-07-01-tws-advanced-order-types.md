@@ -324,12 +324,26 @@ git add backend/models/tws_execution_assistant.py backend/services/tws_broker_ad
 git commit -m "feat: expose tws package reconciliation fields"
 ```
 
-**Scale-Out Cockpit V2 interlude (2026-07-01):** before Task 4 brackets, the
-approved next slice is the Scale-Out Cockpit V2 upgrade — symbol search for
-scale-out instruments, a compact scenario calculator, and read-only package
-grouping in Open Orders. Design:
-`docs/superpowers/specs/2026-07-01-scale-out-cockpit-v2-design.md`. Plan:
-`docs/superpowers/plans/2026-07-01-scale-out-cockpit-v2.md`.
+**Scale-Out Cockpit V2 interlude (2026-07-01): DONE.** Before Task 4 brackets,
+shipped the Scale-Out Cockpit V2 upgrade — symbol search for scale-out
+instruments (reusing the Standard-mode search + chart/quote sync), a compact
+scenario calculator (`scaleOutScenario.ts`, best/worst/selected-scenario
+math), and read-only package grouping in Open Orders
+(`scaleOutPackages.ts` + `ScaleOutPackageManagerPanel.tsx` — scale-out legs
+show no per-leg Cancel/Modify, only a "Manage package" read-only view).
+Design: `docs/superpowers/specs/2026-07-01-scale-out-cockpit-v2-design.md`.
+Plan: `docs/superpowers/plans/2026-07-01-scale-out-cockpit-v2.md`. Both
+batches passed independent spec-compliance + code-quality subagent review
+with no Critical/Important issues. `npm run typecheck` clean throughout;
+`scaleOutScenario.test.ts` and `scaleOutPackages.test.ts` pass (both exact
+tests specified in the plan). **Manual smoke: not yet run** — the sandbox's
+browser preview tool cannot reach this app's dev server (established
+limitation from earlier in Mission 2), so the plan's manual smoke targets
+(symbol search resolving INTC and syncing the chart, calculator showing
++$225/-$130/-$80/-$5 for the 20-share story, Open Orders grouping a real
+scale-out package, normal orders keeping Cancel/Modify while package legs
+don't) still need a human pass in the live app before this is considered
+fully verified.
 
 ### Task 4: Add Bracket Packages
 
