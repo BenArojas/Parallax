@@ -18,6 +18,18 @@ type AdvancedKind = "trailing_stop" | "gtd" | "moc" | "loc";
 type TrailOrderType = "TRAIL" | "TRAILLMT";
 type GtdOrderType = "LMT" | "STP" | "STP LMT" | "TRAIL" | "TRAILLMT";
 
+/** TWS requires "yyyymmdd hh:mm:ss" (seconds mandatory — a freeform text field
+ * that let a user type "16:00" without seconds got a real order canceled by
+ * TWS error 343). `<input type="datetime-local">` only collects minutes, so
+ * seconds are always appended as ":00". No timezone is sent; TWS then assumes
+ * the session's local time-zone. */
+function formatGoodTillDate(datetimeLocal: string): string | null {
+  const [datePart, timePart] = datetimeLocal.split("T");
+  if (!datePart || !timePart) return null;
+  const withSeconds = timePart.split(":").length === 3 ? timePart : `${timePart}:00`;
+  return `${datePart.replace(/-/g, "")} ${withSeconds}`;
+}
+
 const KIND_LABEL: Record<AdvancedKind, string> = {
   trailing_stop: "Trailing Stop",
   gtd: "Good-Till-Date",
@@ -106,7 +118,8 @@ function buildRequest(input: {
   }
 
   // gtd
-  if (!input.goodTillDate) return null;
+  const goodTillDate = formatGoodTillDate(input.goodTillDate);
+  if (!goodTillDate) return null;
   const orderType = input.gtdOrderType;
   let limit_price: number | null = null;
   let stop_price: number | null = null;
@@ -133,7 +146,7 @@ function buildRequest(input: {
     stop_price,
     trail,
     limit_offset: orderType === "TRAILLMT" ? Number(input.limitOffset) : null,
-    good_till_date: input.goodTillDate,
+    good_till_date: goodTillDate,
   };
 }
 
@@ -545,11 +558,11 @@ export function AdvancedOrderPanel({
             )}
             <label className="space-y-1.5 md:col-span-2">
               <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
-                Good till <Hint text="Format: YYYYMMDD HH:MM:SS, in the broker's timezone. The order stays working until then." />
+                Good till <Hint text="The order stays working until this date and time, in your local time zone." />
               </span>
               <input
+                type="datetime-local"
                 className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                placeholder="YYYYMMDD HH:MM:SS"
                 value={goodTillDate}
                 disabled={!canDraft}
                 onChange={(e) => setGoodTillDate(e.target.value)}
