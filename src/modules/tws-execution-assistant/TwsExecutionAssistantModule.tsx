@@ -127,6 +127,29 @@ function QuoteStrip({ quote, exchange, loading }: { quote: QuoteSnapshot | null 
   );
 }
 
+/** Informational-only entitlement note — no action button, no account-settings
+ * link, no "which subscription to buy" detection (Human Approval Gate). Keyed
+ * by conid at the call site so switching symbols always shows its own state
+ * fresh instead of staying dismissed from a previous symbol. */
+function EntitlementGuidanceNote({ reason, exchange }: { reason: string | null | undefined; exchange: string }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed || !reason) return null;
+  return (
+    <div className="mx-3 mt-1.5 flex items-center gap-2 rounded border border-[var(--clr-orange)]/40 bg-[var(--glow-orange)] px-2 py-1 text-[10px] text-[var(--clr-orange)]">
+      <span aria-hidden>⚠</span>
+      <span className="flex-1">{reason}{exchange ? ` (${exchange})` : ""}</span>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        className="text-[var(--clr-orange)]/70 hover:text-[var(--clr-orange)]"
+        onClick={() => setDismissed(true)}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 /** Extract the typed `error` key from a place-paper ApiError response body. */
 function submitErrorCode(err: unknown): string | null {
   if (err instanceof ApiError) {
@@ -635,6 +658,16 @@ export function TwsExecutionAssistantModule() {
   });
   const liveBar = useTwsLiveBars(planForm.conid, activeTimeframe);
   const depth = useTwsLiveDepth(planForm.conid);
+
+  const quoteUnavailable =
+    displayedQuote != null &&
+    (displayedQuote.market_data_type === "unavailable" || displayedQuote.market_data_type === "partial");
+  const depthUnavailable = depth?.entitlement === "unavailable";
+  const entitlementGuidanceReason = quoteUnavailable
+    ? displayedQuote?.unavailable_reason
+    : depthUnavailable
+      ? depth?.unavailable_reason
+      : null;
 
   /** Single entry point for "Modify" anywhere in Open Orders (standalone rows
    * or from inside a package manager panel). Clears every other transient
@@ -1602,7 +1635,10 @@ export function TwsExecutionAssistantModule() {
                 </div>
               </div>
               {planForm.conid > 0 && connected && (
-                <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
+                <>
+                  <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
+                  <EntitlementGuidanceNote key={planForm.conid} reason={entitlementGuidanceReason} exchange={selectedExchange} />
+                </>
               )}
               <div className="flex flex-1 gap-2 p-3">
                 <div className="flex flex-1 overflow-hidden rounded border border-border/60 bg-[var(--bg-0)]">
