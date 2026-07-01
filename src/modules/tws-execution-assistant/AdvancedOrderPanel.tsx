@@ -419,58 +419,67 @@ export function AdvancedOrderPanel({
         </div>
 
         {kind === "trailing_stop" && (
-          <div className="grid gap-3 md:grid-cols-4">
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
-              <select
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                value={trailOrderType}
-                disabled={!canDraft}
-                onChange={(e) => setTrailOrderType(e.target.value as TrailOrderType)}
-              >
-                <option value="TRAIL">TRAIL</option>
-                <option value="TRAILLMT">TRAILLMT</option>
-              </select>
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-[var(--text-2)]">Trail</span>
-              <select
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                value={trailMode}
-                disabled={!canDraft}
-                onChange={(e) => setTrailMode(e.target.value as "amount" | "percent")}
-              >
-                <option value="amount">Amount $</option>
-                <option value="percent">Percent %</option>
-              </select>
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-[var(--text-2)]">Value</span>
-              <input
-                type="number"
-                step="0.01"
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                value={trailValue}
-                disabled={!canDraft}
-                onChange={(e) => setTrailValue(e.target.value)}
-              />
-            </label>
-            {trailOrderType === "TRAILLMT" && (
+          <>
+            <div className="rounded border border-[var(--clr-blue)]/25 bg-[var(--glow-blue)] px-4 py-3 text-xs leading-5 text-[var(--text-2)]">
+              A trailing stop's trigger price follows the market in your favor, then locks in and
+              fires once price reverses by your trail amount. Selling: it trails below the highs
+              and fires if price drops back down. Buying a stock you don't own yet: it trails above
+              the lows as price keeps falling, then fires once price bounces back up — a way to
+              catch a reversal without having to guess the exact bottom.
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
               <label className="space-y-1.5">
-                <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
-                  Limit offset <Hint text="How far below (sell) or above (buy) the trail's trigger price the limit is set once it fires." />
-                </span>
+                <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
+                <select
+                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                  value={trailOrderType}
+                  disabled={!canDraft}
+                  onChange={(e) => setTrailOrderType(e.target.value as TrailOrderType)}
+                >
+                  <option value="TRAIL">TRAIL</option>
+                  <option value="TRAILLMT">TRAILLMT</option>
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-[var(--text-2)]">Trail</span>
+                <select
+                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                  value={trailMode}
+                  disabled={!canDraft}
+                  onChange={(e) => setTrailMode(e.target.value as "amount" | "percent")}
+                >
+                  <option value="amount">Amount $</option>
+                  <option value="percent">Percent %</option>
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-[var(--text-2)]">Value</span>
                 <input
                   type="number"
                   step="0.01"
                   className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={limitOffset}
+                  value={trailValue}
                   disabled={!canDraft}
-                  onChange={(e) => setLimitOffset(e.target.value)}
+                  onChange={(e) => setTrailValue(e.target.value)}
                 />
               </label>
-            )}
-          </div>
+              {trailOrderType === "TRAILLMT" && (
+                <label className="space-y-1.5">
+                  <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
+                    Limit offset <Hint text="How far below (sell) or above (buy) the trail's trigger price the limit is set once it fires." />
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
+                    value={limitOffset}
+                    disabled={!canDraft}
+                    onChange={(e) => setLimitOffset(e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+          </>
         )}
 
         {kind === "gtd" && (
