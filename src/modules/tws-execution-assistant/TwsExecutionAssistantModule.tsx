@@ -135,13 +135,13 @@ function EntitlementGuidanceNote({ reason, exchange }: { reason: string | null |
   const [dismissed, setDismissed] = useState(false);
   if (dismissed || !reason) return null;
   return (
-    <div className="mx-3 mt-1.5 flex items-center gap-2 rounded border border-[var(--clr-orange)]/40 bg-[var(--glow-orange)] px-2 py-1 text-[10px] text-[var(--clr-orange)]">
-      <span aria-hidden>⚠</span>
-      <span className="flex-1">{reason}{exchange ? ` (${exchange})` : ""}</span>
+    <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[10px] font-medium text-[var(--clr-orange)]">
+      <span aria-hidden className="shrink-0">⚠</span>
+      <span className="truncate">{reason}{exchange ? ` (${exchange})` : ""}</span>
       <button
         type="button"
         aria-label="Dismiss"
-        className="text-[var(--clr-orange)]/70 hover:text-[var(--clr-orange)]"
+        className="shrink-0 text-[var(--clr-orange)]/70 hover:text-[var(--clr-orange)]"
         onClick={() => setDismissed(true)}
       >
         ×
@@ -662,7 +662,7 @@ export function TwsExecutionAssistantModule() {
         (r) => r.sec_type === "STK" && r.exchange === "SMART" && r.currency === "USD",
       );
       if (stk.length === 1) {
-        setPlanForm((f) => ({ ...f, conid: stk[0].conid }));
+        setPlanForm((f) => ({ ...f, conid: stk[0].conid, limit_price: null, stop_price: null }));
         setSelectedExchange(stk[0].primary_exchange);
         setSearchResults([]);
       }
@@ -738,7 +738,7 @@ export function TwsExecutionAssistantModule() {
   }
 
   function handleSymbolChange(value: string) {
-    setPlanForm((f) => ({ ...f, symbol: value.toUpperCase(), conid: 0 }));
+    setPlanForm((f) => ({ ...f, symbol: value.toUpperCase(), conid: 0, limit_price: null, stop_price: null }));
     setSearchResults([]);
     setSelectedExchange("");
   }
@@ -1437,7 +1437,7 @@ export function TwsExecutionAssistantModule() {
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}
                   onInstrumentResolved={(instrument) => {
-                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
+                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
                   }}
                   onChartLines={handlePanelChartLines}
@@ -1448,7 +1448,7 @@ export function TwsExecutionAssistantModule() {
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}
                   onInstrumentResolved={(instrument) => {
-                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
+                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
                   }}
                   onChartLines={handlePanelChartLines}
@@ -1459,7 +1459,7 @@ export function TwsExecutionAssistantModule() {
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}
                   onInstrumentResolved={(instrument) => {
-                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
+                    setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
                   }}
                 />
@@ -1497,7 +1497,7 @@ export function TwsExecutionAssistantModule() {
                                   type="button"
                                   className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-[var(--bg-1)]"
                                   onClick={() => {
-                                    setPlanForm((f) => ({ ...f, conid: r.conid }));
+                                    setPlanForm((f) => ({ ...f, conid: r.conid, limit_price: null, stop_price: null }));
                                     setSelectedExchange(r.primary_exchange || r.exchange);
                                     setSearchResults([]);
                                   }}
@@ -1665,10 +1665,14 @@ export function TwsExecutionAssistantModule() {
             <section className="flex h-full min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm">
               <div className="shrink-0 border-b border-border px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
-                    {planForm.symbol ? `${planForm.symbol} Chart` : "Chart"}
-                  </h2>
-                  <div className="flex gap-0.5">
+                  {entitlementGuidanceReason ? (
+                    <EntitlementGuidanceNote key={planForm.conid} reason={entitlementGuidanceReason} exchange={selectedExchange} />
+                  ) : (
+                    <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
+                      {planForm.symbol ? `${planForm.symbol} Chart` : "Chart"}
+                    </h2>
+                  )}
+                  <div className="flex shrink-0 gap-0.5">
                     <button
                       onClick={() => setShowPlanLines((v) => !v)}
                       title="Show plan prices as draggable lines on the chart"
@@ -1704,10 +1708,7 @@ export function TwsExecutionAssistantModule() {
                 )}
               </div>
               {planForm.conid > 0 && connected && (
-                <>
-                  <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
-                  <EntitlementGuidanceNote key={planForm.conid} reason={entitlementGuidanceReason} exchange={selectedExchange} />
-                </>
+                <QuoteStrip quote={displayedQuote} exchange={selectedExchange} loading={quoteLoading} />
               )}
               <div className="flex flex-1 gap-2 p-3">
                 <div className="flex flex-1 overflow-hidden rounded border border-border/60 bg-[var(--bg-0)]">
