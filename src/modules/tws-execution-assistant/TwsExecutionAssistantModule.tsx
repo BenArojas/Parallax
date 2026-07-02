@@ -127,13 +127,28 @@ function QuoteStrip({ quote, exchange, loading }: { quote: QuoteSnapshot | null 
   );
 }
 
-/** Informational-only entitlement note — no action button, no account-settings
- * link, no "which subscription to buy" detection (Human Approval Gate). Keyed
- * by conid at the call site so switching symbols always shows its own state
- * fresh instead of staying dismissed from a previous symbol. */
-function EntitlementGuidanceNote({ reason, exchange }: { reason: string | null | undefined; exchange: string }) {
+/** Chart header title slot — shows the entitlement guidance note in place of
+ * the plain title when data is limited/unavailable (no action button, no
+ * account-settings link, no "which subscription to buy" detection, per the
+ * Human Approval Gate), and falls back to the title once dismissed so the
+ * button row never collapses into an empty slot. Keyed by conid at the call
+ * site so switching symbols always starts fresh instead of staying dismissed
+ * from a previous symbol. */
+function ChartHeaderTitle({
+  reason, exchange, fallbackTitle,
+}: {
+  reason: string | null | undefined;
+  exchange: string;
+  fallbackTitle: string;
+}) {
   const [dismissed, setDismissed] = useState(false);
-  if (dismissed || !reason) return null;
+  if (dismissed || !reason) {
+    return (
+      <h2 className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
+        {fallbackTitle}
+      </h2>
+    );
+  }
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[10px] font-medium text-[var(--clr-orange)]">
       <span aria-hidden className="shrink-0">⚠</span>
@@ -1672,13 +1687,12 @@ export function TwsExecutionAssistantModule() {
             <section className="flex h-full min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm">
               <div className="shrink-0 border-b border-border px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  {entitlementGuidanceReason ? (
-                    <EntitlementGuidanceNote key={planForm.conid} reason={entitlementGuidanceReason} exchange={selectedExchange} />
-                  ) : (
-                    <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
-                      {selectedCompanyName || planForm.symbol || "Chart"}
-                    </h2>
-                  )}
+                  <ChartHeaderTitle
+                    key={planForm.conid}
+                    reason={entitlementGuidanceReason}
+                    exchange={selectedExchange}
+                    fallbackTitle={selectedCompanyName || planForm.symbol || "Chart"}
+                  />
                   <div className="flex shrink-0 gap-0.5">
                     <button
                       onClick={() => setShowPlanLines((v) => !v)}
