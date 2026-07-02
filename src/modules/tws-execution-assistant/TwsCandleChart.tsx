@@ -87,12 +87,83 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
     candleRef.current = candle;
     volRef.current    = vol;
 
+    // ── Plan-line dragging ── lightweight-charts has no native price-line drag.
+    const HIT_PX = 4;
+    let draggingId: string | null = null;
+    let rafId = 0;
+
+    const relY = (ev: MouseEvent) => ev.clientY - el.getBoundingClientRect().top;
+
+    const lineAt = (y: number): PlanChartLine | null => {
+      for (const spec of planLinesRef.current) {
+        const held = priceLinesRef.current.get(spec.id);
+        if (!held) continue;
+        const coord = candle.priceToCoordinate(held.price);
+        if (coord !== null && Math.abs(coord - y) <= HIT_PX) return spec;
+      }
+      return null;
+    };
+
+    const onMouseDown = (ev: MouseEvent) => {
+      const hit = lineAt(relY(ev));
+      if (!hit) return;
+      // Capture phase + stopPropagation: the chart canvas must never see this
+      // mousedown, or it starts a pan gesture underneath the line drag.
+      ev.preventDefault();
+      ev.stopPropagation();
+      draggingId = hit.id;
+      draggingIdRef.current = hit.id;
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+    };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const y = relY(ev);
+      if (!draggingId) {
+        const rect = el.getBoundingClientRect();
+        const inside =
+          ev.clientX >= rect.left && ev.clientX <= rect.right &&
+          ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+        el.style.cursor = inside && lineAt(y) ? "ns-resize" : "";
+        return;
+      }
+      const raw = candle.coordinateToPrice(y);
+      if (raw === null) return;
+      const price = Math.round((raw as number) * 100) / 100;
+      if (price <= 0) return;
+      const held = priceLinesRef.current.get(draggingId);
+      const spec = planLinesRef.current.find((l) => l.id === draggingId);
+      if (!held || !spec) return;
+      held.line.applyOptions({ price }); // imperative — zero React work per frame
+      held.price = price;
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => spec.onDrag(price)); // form update, latest wins
+    };
+
+    const onMouseUp = () => {
+      if (!draggingId) return;
+      const held = priceLinesRef.current.get(draggingId);
+      const spec = planLinesRef.current.find((l) => l.id === draggingId);
+      draggingId = null;
+      draggingIdRef.current = null;
+      chart.applyOptions({ handleScroll: true, handleScale: true });
+      cancelAnimationFrame(rafId);
+      if (held && spec) spec.onDrag(held.price); // final commit
+    };
+
+    el.addEventListener("mousedown", onMouseDown, true);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+
     const ro = new ResizeObserver(() => {
       chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
     });
     ro.observe(el);
 
     return () => {
+      el.removeEventListener("mousedown", onMouseDown, true);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      cancelAnimationFrame(rafId);
       ro.disconnect();
       chart.remove();
       chartRef.current = candleRef.current = volRef.current = null;
