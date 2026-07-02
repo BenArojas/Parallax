@@ -188,16 +188,20 @@ export function AdvancedOrderPanel({
   isLiveSession,
   connected,
   onInstrumentResolved,
+  initialConid,
+  initialSymbol,
 }: {
   canDraft: boolean;
   isLiveSession: boolean;
   connected: boolean;
   onInstrumentResolved: (instrument: InstrumentResult) => void;
+  initialConid?: number;
+  initialSymbol?: string;
 }) {
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<AdvancedKind>("trailing_stop");
-  const [conid, setConid] = useState(0);
-  const [symbol, setSymbol] = useState("");
+  const [conid, setConid] = useState(initialConid ?? 0);
+  const [symbol, setSymbol] = useState(initialSymbol ?? "");
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [side, setSide] = useState<ExecutionPlanSide>("SELL");
   const [quantity, setQuantity] = useState("");

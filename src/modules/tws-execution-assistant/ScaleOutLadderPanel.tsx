@@ -138,16 +138,20 @@ export function ScaleOutLadderPanel({
   connected,
   onInstrumentResolved,
   onChartLines,
+  initialConid,
+  initialSymbol,
 }: {
   canDraft: boolean;
   isLiveSession: boolean;
   connected: boolean;
   onInstrumentResolved: (instrument: InstrumentResult) => void;
   onChartLines?: (conid: number, lines: PlanChartLine[]) => void;
+  initialConid?: number;
+  initialSymbol?: string;
 }) {
   const queryClient = useQueryClient();
-  const [conid, setConid] = useState(0);
-  const [symbol, setSymbol] = useState("");
+  const [conid, setConid] = useState(initialConid ?? 0);
+  const [symbol, setSymbol] = useState(initialSymbol ?? "");
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [orderType, setOrderType] = useState<"MKT" | "LMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");

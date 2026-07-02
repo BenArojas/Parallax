@@ -134,23 +134,16 @@ function QuoteStrip({ quote, exchange, loading }: { quote: QuoteSnapshot | null 
  * button row never collapses into an empty slot. Keyed by conid at the call
  * site so switching symbols always starts fresh instead of staying dismissed
  * from a previous symbol. */
-function ChartHeaderTitle({
-  reason, exchange, fallbackTitle,
-}: {
-  reason: string | null | undefined;
-  exchange: string;
-  fallbackTitle: string;
-}) {
+/** Informational-only entitlement note — no action button, no account-settings
+ * link, no "which subscription to buy" detection (Human Approval Gate). Keyed
+ * by conid at the call site so switching symbols always shows its own state
+ * fresh instead of staying dismissed from a previous symbol. Rendered beside
+ * the chart title, not in place of it. */
+function EntitlementGuidanceNote({ reason, exchange }: { reason: string | null | undefined; exchange: string }) {
   const [dismissed, setDismissed] = useState(false);
-  if (dismissed || !reason) {
-    return (
-      <h2 className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
-        {fallbackTitle}
-      </h2>
-    );
-  }
+  if (dismissed || !reason) return null;
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[10px] font-medium text-[var(--clr-orange)]">
+    <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-[var(--clr-orange)]">
       <span aria-hidden className="shrink-0">⚠</span>
       <span className="truncate">{reason}{exchange ? ` (${exchange})` : ""}</span>
       <button
@@ -162,6 +155,31 @@ function ChartHeaderTitle({
         ×
       </button>
     </div>
+  );
+}
+
+/** Compact iOS-style switch — used instead of a plain toggle button where a
+ * clear on/off state matters more than a label. */
+function ToggleSwitch({ checked, onChange, title }: { checked: boolean; onChange: () => void; title?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      title={title}
+      onClick={onChange}
+      className={cn(
+        "relative h-3.5 w-6 shrink-0 rounded-full transition-colors duration-200",
+        checked ? "bg-[var(--clr-cyan)]" : "bg-[var(--bg-2)] border border-border",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-1/2 left-0.5 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-white shadow transition-transform duration-200",
+          checked && "translate-x-[10px]",
+        )}
+      />
+    </button>
   );
 }
 
@@ -1454,6 +1472,8 @@ export function TwsExecutionAssistantModule() {
                   canDraft={canDraft}
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}
+                  initialConid={planForm.conid}
+                  initialSymbol={planForm.symbol}
                   onInstrumentResolved={(instrument) => {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
@@ -1466,6 +1486,8 @@ export function TwsExecutionAssistantModule() {
                   canDraft={canDraft}
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}
+                  initialConid={planForm.conid}
+                  initialSymbol={planForm.symbol}
                   onInstrumentResolved={(instrument) => {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
@@ -1478,6 +1500,8 @@ export function TwsExecutionAssistantModule() {
                   canDraft={canDraft}
                   isLiveSession={isLiveSession}
                   connected={status?.connected === true}
+                  initialConid={planForm.conid}
+                  initialSymbol={planForm.symbol}
                   onInstrumentResolved={(instrument) => {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
@@ -1686,26 +1710,22 @@ export function TwsExecutionAssistantModule() {
           <aside className="h-[480px]">
             <section className="flex h-full min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm">
               <div className="shrink-0 border-b border-border px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <ChartHeaderTitle
-                    key={planForm.conid}
-                    reason={entitlementGuidanceReason}
-                    exchange={selectedExchange}
-                    fallbackTitle={selectedCompanyName || planForm.symbol || "Chart"}
-                  />
-                  <div className="flex shrink-0 gap-0.5">
-                    <button
-                      onClick={() => setShowPlanLines((v) => !v)}
-                      title="Show plan prices as draggable lines on the chart"
-                      className={cn(
-                        "mr-1 rounded px-1.5 py-0.5 text-[9px] transition-colors",
-                        showPlanLines
-                          ? "bg-[var(--glow-cyan)] font-semibold text-[var(--clr-cyan)]"
-                          : "text-[var(--text-3)] hover:text-[var(--text-2)]",
-                      )}
-                    >
-                      Lines
-                    </button>
+                <div className="flex items-center gap-2">
+                  <h2 className="max-w-[45%] shrink-0 truncate text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
+                    {selectedCompanyName || planForm.symbol || "Chart"}
+                  </h2>
+                  <div className="min-w-0 flex-1">
+                    <EntitlementGuidanceNote key={planForm.conid} reason={entitlementGuidanceReason} exchange={selectedExchange} />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <div className="mr-1.5 flex items-center gap-1">
+                      <span className="text-[9px] text-[var(--text-3)]">Lines</span>
+                      <ToggleSwitch
+                        checked={showPlanLines}
+                        onChange={() => setShowPlanLines((v) => !v)}
+                        title="Show plan prices as draggable lines on the chart"
+                      />
+                    </div>
                     {TWS_TIMEFRAMES.map((tf) => (
                       <button
                         key={tf}
