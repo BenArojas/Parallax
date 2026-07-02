@@ -455,6 +455,29 @@ export function TwsExecutionAssistantModule() {
     return lines;
   }, [planForm.order_type, planForm.limit_price, planForm.stop_price, standardReviewLocked]);
 
+  const modifyPlanLines = useMemo<PlanChartLine[]>(() => {
+    if (!editingOrder) return [];
+    const fields = canModifyOrderType(editingOrder.order_type)
+      ? priceFieldsFor(editingOrder.order_type as TwsOrderType)
+      : [];
+    const lines: PlanChartLine[] = [];
+    if (fields.includes("limit_price") && modifyForm.limit_price && modifyForm.limit_price > 0) {
+      lines.push({
+        id: "modify-limit", price: modifyForm.limit_price, kind: "entry", label: "Entry",
+        onDrag: (p) => setModifyForm((f) => ({ ...f, limit_price: p })),
+        locked: modifyReview,
+      });
+    }
+    if (fields.includes("stop_price") && modifyForm.stop_price && modifyForm.stop_price > 0) {
+      lines.push({
+        id: "modify-stop", price: modifyForm.stop_price, kind: "stop", label: "Stop",
+        onDrag: (p) => setModifyForm((f) => ({ ...f, stop_price: p })),
+        locked: modifyReview,
+      });
+    }
+    return lines;
+  }, [editingOrder, modifyForm.limit_price, modifyForm.stop_price, modifyReview]);
+
   const [panelChart, setPanelChart] = useState<{ conid: number; lines: PlanChartLine[] }>({ conid: 0, lines: [] });
   const handlePanelChartLines = useCallback(
     (conid: number, lines: PlanChartLine[]) => setPanelChart({ conid, lines }),
@@ -471,13 +494,16 @@ export function TwsExecutionAssistantModule() {
 
   const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
   const panelLinesMatch = panelChart.conid > 0 && panelChart.conid === planForm.conid;
+  const editingLinesMatch = editingOrder != null && editingOrder.conid === planForm.conid;
   const chartLines = !showPlanLines ? EMPTY_LINES
+    : editingOrder != null ? (editingLinesMatch ? modifyPlanLines : EMPTY_LINES)
     : planMode === "standard" ? standardPlanLines
     : (planMode === "scale_out" || planMode === "bracket") && panelLinesMatch ? panelChart.lines
     : EMPTY_LINES;
   const panelLinesMismatch =
     showPlanLines && (planMode === "scale_out" || planMode === "bracket") &&
     panelChart.lines.length > 0 && !panelLinesMatch;
+  const editingLinesMismatch = showPlanLines && editingOrder != null && !editingLinesMatch;
 
   const { data: status } = useQuery({
     queryKey: STATUS_KEY,
@@ -1756,6 +1782,11 @@ export function TwsExecutionAssistantModule() {
                 {panelLinesMismatch && (
                   <p className="mt-1 text-[9px] text-[var(--text-3)]">
                     Plan lines hidden — the builder&apos;s symbol differs from the charted symbol.
+                  </p>
+                )}
+                {editingLinesMismatch && (
+                  <p className="mt-1 text-[9px] text-[var(--text-3)]">
+                    Plan lines hidden — the order being modified is a different symbol than the charted one.
                   </p>
                 )}
               </div>
