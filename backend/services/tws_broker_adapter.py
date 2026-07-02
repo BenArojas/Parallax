@@ -102,7 +102,9 @@ _MDT_MAP: dict[int, str] = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed_fr
 # IBKR codes that are expected market-data permission responses, not real errors.
 # 10089: no live subscription, delayed data may be available.
 # 10090: partial subscription.
-_EXPECTED_MDT_ERRORS: frozenset[int] = frozenset({10089, 10090})
+# 10197: no data during a competing live session (paper accounts borrow market
+# data from their live user, so a login with either account anywhere triggers it).
+_EXPECTED_MDT_ERRORS: frozenset[int] = frozenset({10089, 10090, 10197})
 
 _ib_log = logging.getLogger("ib_async")
 
@@ -225,6 +227,12 @@ class TwsBrokerAdapter:
             return (
                 "partial",
                 "Partial market data subscription — some fields may be missing.",
+            )
+        if error_code == 10197:
+            return (
+                "unavailable",
+                "Another IBKR session (TWS, mobile, or web) is holding this account's "
+                "market data — log out other sessions to restore data here.",
             )
         return _MDT_MAP.get(market_data_type_code or 0, "unknown"), None
 
@@ -780,7 +788,7 @@ class TwsBrokerAdapter:
                     self._ib.reqTickersAsync(contract), timeout=5.0
                 )
             except (RuntimeError, OSError, asyncio.TimeoutError) as exc:
-                log.warning("Quote fetch failed for conid %s: %s", conid, exc)
+                log.warning("Quote fetch failed for conid %s: %r", conid, exc)
                 return QuoteSnapshot()
 
             if not tickers:
@@ -1209,7 +1217,7 @@ class TwsBrokerAdapter:
                 timeout=30,
             )
         except (RuntimeError, OSError, asyncio.TimeoutError) as exc:
-            log.warning("Bars fetch failed conid=%s tf=%s: %s", conid, timeframe, exc)
+            log.warning("Bars fetch failed conid=%s tf=%s: %r", conid, timeframe, exc)
             return BarsResponse(conid=conid, timeframe=timeframe)
 
         bars: list[BarSnapshot] = []

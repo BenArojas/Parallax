@@ -33,8 +33,10 @@ def test_get_quote_maps_10090_to_partial():
     from ib_async import Contract as IbContract, Ticker
 
     class _FakeIB:
-        def __init__(self) -> None:
+        def __init__(self, code: int, message: str) -> None:
             self.errorEvent = _CallableEvent()
+            self._code = code
+            self._message = message
 
         def isConnected(self) -> bool:
             return True
@@ -45,8 +47,8 @@ def test_get_quote_maps_10090_to_partial():
         async def reqTickersAsync(self, *contracts):
             self.errorEvent.emit(
                 1,
-                10090,
-                "Part of requested market data is not subscribed.",
+                self._code,
+                self._message,
                 contracts[0] if contracts else None,
             )
             return [Ticker(contract=contracts[0] if contracts else IbContract())]
@@ -55,7 +57,7 @@ def test_get_quote_maps_10090_to_partial():
             pass
 
     adapter = TwsBrokerAdapter()
-    adapter._ib = _FakeIB()  # type: ignore[assignment]
+    adapter._ib = _FakeIB(10090, "Part of requested market data is not subscribed.")  # type: ignore[assignment]
     adapter._state = "connected"
 
     result = asyncio.run(adapter.get_quote(123))
@@ -64,6 +66,11 @@ def test_get_quote_maps_10090_to_partial():
     assert result.error_code == 10090
     assert result.unavailable_reason == "Partial market data subscription — some fields may be missing."
     assert result.is_delayed is False
+
+    # 10197: another IBKR session (paper borrows its live user's market data) is holding it.
+    adapter._ib = _FakeIB(10197, "No market data during competing live session")  # type: ignore[assignment]
+    result_10197 = asyncio.run(adapter.get_quote(123))
+    assert result_10197.market_data_type == "unavailable" and "log out" in (result_10197.unavailable_reason or "").lower()
 
 
 def test_stream_quote_prefers_ticker_data_over_10089_warning():
