@@ -461,6 +461,14 @@ export function TwsExecutionAssistantModule() {
     [],
   );
 
+  // Scale-out/bracket/advanced panels have their own preview/submission review
+  // state the module can't see directly — mirrors standardReviewLocked so mode
+  // switching can't silently unmount a panel mid-review (same bug class 9f5c02d
+  // fixed for the standard-mode flow).
+  const [panelReviewLocked, setPanelReviewLocked] = useState(false);
+  const handlePanelReviewLocked = useCallback((locked: boolean) => setPanelReviewLocked(locked), []);
+  const reviewLocked = standardReviewLocked || panelReviewLocked;
+
   const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
   const panelLinesMatch = panelChart.conid > 0 && panelChart.conid === planForm.conid;
   const chartLines = !showPlanLines ? EMPTY_LINES
@@ -762,7 +770,7 @@ export function TwsExecutionAssistantModule() {
   }
 
   function selectPlanMode(mode: PlanMode) {
-    if (mode === planMode || standardReviewLocked) return;
+    if (mode === planMode || reviewLocked) return;
     setPlanMode(mode);
     if (mode === "scale_out") {
       setSweeping(true);
@@ -998,8 +1006,8 @@ export function TwsExecutionAssistantModule() {
               <div className="flex shrink-0 rounded-full border border-border p-0.5 text-[9px] font-semibold">
                 <button
                   type="button"
-                  disabled={standardReviewLocked}
-                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
+                  disabled={reviewLocked}
+                  title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
                     "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "standard" ? "bg-[var(--clr-cyan)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
@@ -1010,8 +1018,8 @@ export function TwsExecutionAssistantModule() {
                 </button>
                 <button
                   type="button"
-                  disabled={standardReviewLocked}
-                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
+                  disabled={reviewLocked}
+                  title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
                     "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "scale_out" ? "bg-[var(--clr-purple)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
@@ -1022,8 +1030,8 @@ export function TwsExecutionAssistantModule() {
                 </button>
                 <button
                   type="button"
-                  disabled={standardReviewLocked}
-                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
+                  disabled={reviewLocked}
+                  title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
                     "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "bracket" ? "bg-[var(--clr-orange)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
@@ -1034,8 +1042,8 @@ export function TwsExecutionAssistantModule() {
                 </button>
                 <button
                   type="button"
-                  disabled={standardReviewLocked}
-                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
+                  disabled={reviewLocked}
+                  title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
                     "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "advanced" ? "bg-[var(--clr-blue)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
@@ -1480,6 +1488,7 @@ export function TwsExecutionAssistantModule() {
                     setSelectedCompanyName(instrument.company_name);
                   }}
                   onChartLines={handlePanelChartLines}
+                  onReviewLocked={handlePanelReviewLocked}
                 />
               ) : planMode === "bracket" ? (
                 <BracketBuilderPanel
@@ -1494,6 +1503,7 @@ export function TwsExecutionAssistantModule() {
                     setSelectedCompanyName(instrument.company_name);
                   }}
                   onChartLines={handlePanelChartLines}
+                  onReviewLocked={handlePanelReviewLocked}
                 />
               ) : planMode === "advanced" ? (
                 <AdvancedOrderPanel
@@ -1507,6 +1517,7 @@ export function TwsExecutionAssistantModule() {
                     setSelectedExchange(instrument.primary_exchange);
                     setSelectedCompanyName(instrument.company_name);
                   }}
+                  onReviewLocked={handlePanelReviewLocked}
                 />
               ) : (
                 <div className="relative flex h-full flex-col">

@@ -93,6 +93,7 @@ export function BracketBuilderPanel({
   connected,
   onInstrumentResolved,
   onChartLines,
+  onReviewLocked,
   initialConid,
   initialSymbol,
 }: {
@@ -101,6 +102,7 @@ export function BracketBuilderPanel({
   connected: boolean;
   onInstrumentResolved: (instrument: InstrumentResult) => void;
   onChartLines?: (conid: number, lines: PlanChartLine[]) => void;
+  onReviewLocked?: (locked: boolean) => void;
   initialConid?: number;
   initialSymbol?: string;
 }) {
@@ -118,6 +120,14 @@ export function BracketBuilderPanel({
   const [trailValue, setTrailValue] = useState("");
   const [preview, setPreview] = useState<TwsOrderPackagePreview | null>(null);
   const [submission, setSubmission] = useState<TwsOrderPackageSubmission | null>(null);
+
+  // Preview/submission is a review-in-progress the module can't see — publish
+  // it so the module can lock mode switching instead of silently unmounting
+  // this panel mid-review (same bug class as standardReviewLocked).
+  useEffect(() => {
+    onReviewLocked?.(preview != null || submission != null);
+  }, [onReviewLocked, preview, submission]);
+  useEffect(() => () => onReviewLocked?.(false), [onReviewLocked]);
 
   useEffect(() => {
     if (!onChartLines) return;

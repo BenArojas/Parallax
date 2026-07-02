@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { ApiError } from "@/lib/sidecarClient";
@@ -188,6 +188,7 @@ export function AdvancedOrderPanel({
   isLiveSession,
   connected,
   onInstrumentResolved,
+  onReviewLocked,
   initialConid,
   initialSymbol,
 }: {
@@ -195,6 +196,7 @@ export function AdvancedOrderPanel({
   isLiveSession: boolean;
   connected: boolean;
   onInstrumentResolved: (instrument: InstrumentResult) => void;
+  onReviewLocked?: (locked: boolean) => void;
   initialConid?: number;
   initialSymbol?: string;
 }) {
@@ -218,6 +220,14 @@ export function AdvancedOrderPanel({
   const [conditionPrice, setConditionPrice] = useState("");
   const [preview, setPreview] = useState<TwsOrderPackagePreview | null>(null);
   const [submission, setSubmission] = useState<TwsOrderPackageSubmission | null>(null);
+
+  // Preview/submission is a review-in-progress the module can't see — publish
+  // it so the module can lock mode switching instead of silently unmounting
+  // this panel mid-review (same bug class as standardReviewLocked).
+  useEffect(() => {
+    onReviewLocked?.(preview != null || submission != null);
+  }, [onReviewLocked, preview, submission]);
+  useEffect(() => () => onReviewLocked?.(false), [onReviewLocked]);
 
   const searchMutation = useMutation({
     mutationFn: (sym: string) => twsApi.searchInstruments(sym),
