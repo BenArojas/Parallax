@@ -25,6 +25,7 @@ export interface PlanChartLine {
   kind: "entry" | "target" | "stop";  // entry=#00d4ff, target=theme.upColor, stop=theme.downColor
   label: string;                      // axis label: "Entry", "T1", "S1", "Target", "Stop"
   onDrag: (price: number) => void;    // pushes a dragged price back into the source form state
+  locked?: boolean;                   // reviewed/submitted — line stays visible but is not draggable
 }
 
 export function TwsCandleChart({ bars, liveBar, planLines }: {
@@ -96,6 +97,7 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
 
     const lineAt = (y: number): PlanChartLine | null => {
       for (const spec of planLinesRef.current) {
+        if (spec.locked) continue;
         const held = priceLinesRef.current.get(spec.id);
         if (!held) continue;
         const coord = candle.priceToCoordinate(held.price);

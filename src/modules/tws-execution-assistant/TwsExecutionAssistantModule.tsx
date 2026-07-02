@@ -396,6 +396,11 @@ export function TwsExecutionAssistantModule() {
   const [managedScaleOutPackageId, setManagedScaleOutPackageId] = useState<string | null>(null);
   const [managedBracketPackageId, setManagedBracketPackageId] = useState<string | null>(null);
 
+  // Reviewed or already-submitted — the draft is no longer being edited, so
+  // its chart lines lock and mode switching is disabled to prevent the plan
+  // silently drifting away from what was reviewed.
+  const standardReviewLocked = paperPreview != null || paperSubmission != null;
+
   const standardPlanLines = useMemo<PlanChartLine[]>(() => {
     const fields = priceFieldsFor(planForm.order_type);
     const lines: PlanChartLine[] = [];
@@ -403,16 +408,18 @@ export function TwsExecutionAssistantModule() {
       lines.push({
         id: "plan-limit", price: planForm.limit_price, kind: "entry", label: "Entry",
         onDrag: (p) => setPlanForm((f) => ({ ...f, limit_price: p })),
+        locked: standardReviewLocked,
       });
     }
     if (fields.includes("stop_price") && planForm.stop_price && planForm.stop_price > 0) {
       lines.push({
         id: "plan-stop", price: planForm.stop_price, kind: "stop", label: "Stop",
         onDrag: (p) => setPlanForm((f) => ({ ...f, stop_price: p })),
+        locked: standardReviewLocked,
       });
     }
     return lines;
-  }, [planForm.order_type, planForm.limit_price, planForm.stop_price]);
+  }, [planForm.order_type, planForm.limit_price, planForm.stop_price, standardReviewLocked]);
 
   const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
   const chartLines = !showPlanLines ? EMPTY_LINES
@@ -709,7 +716,7 @@ export function TwsExecutionAssistantModule() {
   }
 
   function selectPlanMode(mode: PlanMode) {
-    if (mode === planMode) return;
+    if (mode === planMode || standardReviewLocked) return;
     setPlanMode(mode);
     if (mode === "scale_out") {
       setSweeping(true);
@@ -944,8 +951,10 @@ export function TwsExecutionAssistantModule() {
               <div className="flex shrink-0 rounded-full border border-border p-0.5 text-[9px] font-semibold">
                 <button
                   type="button"
+                  disabled={standardReviewLocked}
+                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "standard" ? "bg-[var(--clr-cyan)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
                   )}
                   onClick={() => selectPlanMode("standard")}
@@ -954,8 +963,10 @@ export function TwsExecutionAssistantModule() {
                 </button>
                 <button
                   type="button"
+                  disabled={standardReviewLocked}
+                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "scale_out" ? "bg-[var(--clr-purple)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
                   )}
                   onClick={() => selectPlanMode("scale_out")}
@@ -964,8 +975,10 @@ export function TwsExecutionAssistantModule() {
                 </button>
                 <button
                   type="button"
+                  disabled={standardReviewLocked}
+                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "bracket" ? "bg-[var(--clr-orange)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
                   )}
                   onClick={() => selectPlanMode("bracket")}
@@ -974,8 +987,10 @@ export function TwsExecutionAssistantModule() {
                 </button>
                 <button
                   type="button"
+                  disabled={standardReviewLocked}
+                  title={standardReviewLocked ? "Edit ticket to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200",
+                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
                     planMode === "advanced" ? "bg-[var(--clr-blue)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
                   )}
                   onClick={() => selectPlanMode("advanced")}
