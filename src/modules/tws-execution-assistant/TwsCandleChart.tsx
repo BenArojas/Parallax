@@ -7,6 +7,7 @@ import {
   LineStyle,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type CandlestickData,
   type HistogramData,
   type Time,
@@ -18,11 +19,26 @@ import type { BarSnapshot } from "./api";
 const VOL_UP   = "rgba(0, 255, 136, 0.18)";
 const VOL_DOWN = "rgba(255, 68, 102, 0.18)";
 
-export function TwsCandleChart({ bars, liveBar }: { bars: BarSnapshot[]; liveBar?: BarSnapshot | null }) {
+export interface PlanChartLine {
+  id: string;                         // stable per source field, e.g. "plan-limit", "ladder-t0"
+  price: number;                      // already rounded to 0.01 by the source
+  kind: "entry" | "target" | "stop";  // entry=#00d4ff, target=theme.upColor, stop=theme.downColor
+  label: string;                      // axis label: "Entry", "T1", "S1", "Target", "Stop"
+  onDrag: (price: number) => void;    // pushes a dragged price back into the source form state
+}
+
+export function TwsCandleChart({ bars, liveBar, planLines }: {
+  bars: BarSnapshot[];
+  liveBar?: BarSnapshot | null;
+  planLines?: PlanChartLine[];
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef  = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volRef    = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const priceLinesRef = useRef<Map<string, { line: IPriceLine; price: number }>>(new Map());
+  const planLinesRef  = useRef<PlanChartLine[]>([]);
+  const draggingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -80,6 +96,7 @@ export function TwsCandleChart({ bars, liveBar }: { bars: BarSnapshot[]; liveBar
       ro.disconnect();
       chart.remove();
       chartRef.current = candleRef.current = volRef.current = null;
+      priceLinesRef.current.clear();
     };
   }, []);
 
@@ -124,6 +141,47 @@ export function TwsCandleChart({ bars, liveBar }: { bars: BarSnapshot[]; liveBar
       color: liveBar.close >= liveBar.open ? VOL_UP : VOL_DOWN,
     });
   }, [liveBar, bars]);
+
+  useEffect(() => {
+    const candle = candleRef.current;
+    if (!candle) return;
+    const lines = planLines ?? [];
+    planLinesRef.current = lines;
+    const theme = readChartTheme();
+    const colorFor = (kind: PlanChartLine["kind"]) =>
+      kind === "target" ? theme.upColor : kind === "stop" ? theme.downColor : "#00d4ff";
+
+    const held = priceLinesRef.current;
+    const seen = new Set<string>();
+    for (const spec of lines) {
+      seen.add(spec.id);
+      const entry = held.get(spec.id);
+      if (!entry) {
+        held.set(spec.id, {
+          price: spec.price,
+          line: candle.createPriceLine({
+            price: spec.price,
+            color: colorFor(spec.kind),
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: spec.label,
+          }),
+        });
+      } else if (entry.price !== spec.price && draggingIdRef.current !== spec.id) {
+        // draggingIdRef guard: while a drag is in flight, a stale prop echo of the
+        // previous rAF commit must not snap the line back a frame (Task 2).
+        entry.line.applyOptions({ price: spec.price });
+        entry.price = spec.price;
+      }
+    }
+    for (const [id, entry] of held) {
+      if (!seen.has(id)) {
+        candle.removePriceLine(entry.line);
+        held.delete(id);
+      }
+    }
+  }, [planLines]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

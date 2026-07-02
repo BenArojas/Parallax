@@ -16,7 +16,7 @@ import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
 import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
-import { TwsCandleChart } from "./TwsCandleChart";
+import { TwsCandleChart, type PlanChartLine } from "./TwsCandleChart";
 import { DepthPanel } from "./DepthPanel";
 import { useTwsLiveQuote } from "./useTwsLiveQuote";
 import { useTwsLiveBars } from "./useTwsLiveBars";
@@ -387,6 +387,7 @@ export function TwsExecutionAssistantModule() {
   const [paperSubmission, setPaperSubmission] = useState<PaperOrderSubmission | null>(null);
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [activeTimeframe, setActiveTimeframe] = useState<TwsTimeframe>("5m");
+  const [showPlanLines, setShowPlanLines] = useState(true);
   const [selectedExchange, setSelectedExchange] = useState("");
   const [editingOrder, setEditingOrder] = useState<OrderSnapshot | null>(null);
   const [modifyForm, setModifyForm] = useState<TwsModifyOrderRequest>({ quantity: 1, limit_price: null, stop_price: null });
@@ -394,6 +395,29 @@ export function TwsExecutionAssistantModule() {
   const [advancedReject, setAdvancedReject] = useState<TwsAdvancedReject | null>(null);
   const [managedScaleOutPackageId, setManagedScaleOutPackageId] = useState<string | null>(null);
   const [managedBracketPackageId, setManagedBracketPackageId] = useState<string | null>(null);
+
+  const standardPlanLines = useMemo<PlanChartLine[]>(() => {
+    const fields = priceFieldsFor(planForm.order_type);
+    const lines: PlanChartLine[] = [];
+    if (fields.includes("limit_price") && planForm.limit_price && planForm.limit_price > 0) {
+      lines.push({
+        id: "plan-limit", price: planForm.limit_price, kind: "entry", label: "Entry",
+        onDrag: (p) => setPlanForm((f) => ({ ...f, limit_price: p })),
+      });
+    }
+    if (fields.includes("stop_price") && planForm.stop_price && planForm.stop_price > 0) {
+      lines.push({
+        id: "plan-stop", price: planForm.stop_price, kind: "stop", label: "Stop",
+        onDrag: (p) => setPlanForm((f) => ({ ...f, stop_price: p })),
+      });
+    }
+    return lines;
+  }, [planForm.order_type, planForm.limit_price, planForm.stop_price]);
+
+  const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
+  const chartLines = !showPlanLines ? EMPTY_LINES
+    : planMode === "standard" ? standardPlanLines
+    : EMPTY_LINES; // scale_out/bracket wired in a later task — out of scope here
 
   const { data: status } = useQuery({
     queryKey: STATUS_KEY,
@@ -1617,6 +1641,18 @@ export function TwsExecutionAssistantModule() {
                     {planForm.symbol ? `${planForm.symbol} Chart` : "Chart"}
                   </h2>
                   <div className="flex gap-0.5">
+                    <button
+                      onClick={() => setShowPlanLines((v) => !v)}
+                      title="Show plan prices as draggable lines on the chart"
+                      className={cn(
+                        "mr-1 rounded px-1.5 py-0.5 text-[9px] transition-colors",
+                        showPlanLines
+                          ? "bg-[var(--glow-cyan)] font-semibold text-[var(--clr-cyan)]"
+                          : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                      )}
+                    >
+                      Lines
+                    </button>
                     {TWS_TIMEFRAMES.map((tf) => (
                       <button
                         key={tf}
@@ -1647,7 +1683,7 @@ export function TwsExecutionAssistantModule() {
                       Loading bars…
                     </div>
                   ) : barsData && barsData.bars.length > 0 ? (
-                    <TwsCandleChart bars={barsData.bars} liveBar={liveBar} />
+                    <TwsCandleChart bars={barsData.bars} liveBar={liveBar} planLines={chartLines} />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-center">
                       <div>
