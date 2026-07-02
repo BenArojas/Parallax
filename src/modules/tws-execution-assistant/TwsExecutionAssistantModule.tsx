@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, LockKeyhole, Power, Search } from "lucide-react";
 import { BackToOrbitButton } from "@/components/ui/BackToOrbitButton";
@@ -421,10 +421,21 @@ export function TwsExecutionAssistantModule() {
     return lines;
   }, [planForm.order_type, planForm.limit_price, planForm.stop_price, standardReviewLocked]);
 
+  const [panelChart, setPanelChart] = useState<{ conid: number; lines: PlanChartLine[] }>({ conid: 0, lines: [] });
+  const handlePanelChartLines = useCallback(
+    (conid: number, lines: PlanChartLine[]) => setPanelChart({ conid, lines }),
+    [],
+  );
+
   const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
+  const panelLinesMatch = panelChart.conid > 0 && panelChart.conid === planForm.conid;
   const chartLines = !showPlanLines ? EMPTY_LINES
     : planMode === "standard" ? standardPlanLines
-    : EMPTY_LINES; // scale_out/bracket wired in a later task — out of scope here
+    : (planMode === "scale_out" || planMode === "bracket") && panelLinesMatch ? panelChart.lines
+    : EMPTY_LINES;
+  const panelLinesMismatch =
+    showPlanLines && (planMode === "scale_out" || planMode === "bracket") &&
+    panelChart.lines.length > 0 && !panelLinesMatch;
 
   const { data: status } = useQuery({
     queryKey: STATUS_KEY,
@@ -1429,6 +1440,7 @@ export function TwsExecutionAssistantModule() {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
                     setSelectedExchange(instrument.primary_exchange);
                   }}
+                  onChartLines={handlePanelChartLines}
                 />
               ) : planMode === "bracket" ? (
                 <BracketBuilderPanel
@@ -1439,6 +1451,7 @@ export function TwsExecutionAssistantModule() {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid }));
                     setSelectedExchange(instrument.primary_exchange);
                   }}
+                  onChartLines={handlePanelChartLines}
                 />
               ) : planMode === "advanced" ? (
                 <AdvancedOrderPanel
@@ -1684,6 +1697,11 @@ export function TwsExecutionAssistantModule() {
                     ))}
                   </div>
                 </div>
+                {panelLinesMismatch && (
+                  <p className="mt-1 text-[9px] text-[var(--text-3)]">
+                    Plan lines hidden — the builder&apos;s symbol differs from the charted symbol.
+                  </p>
+                )}
               </div>
               {planForm.conid > 0 && connected && (
                 <>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { ApiError } from "@/lib/sidecarClient";
@@ -12,6 +12,7 @@ import {
   type TwsOrderPackageSubmission,
   type TwsScaleOutLotDraft,
 } from "./api";
+import type { PlanChartLine } from "./TwsCandleChart";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
 import { ScaleOutScenarioCalculator } from "./ScaleOutScenarioCalculator";
 import type { ScaleOutScenarioLot } from "./scaleOutScenario";
@@ -136,11 +137,13 @@ export function ScaleOutLadderPanel({
   isLiveSession,
   connected,
   onInstrumentResolved,
+  onChartLines,
 }: {
   canDraft: boolean;
   isLiveSession: boolean;
   connected: boolean;
   onInstrumentResolved: (instrument: InstrumentResult) => void;
+  onChartLines?: (conid: number, lines: PlanChartLine[]) => void;
 }) {
   const queryClient = useQueryClient();
   const [conid, setConid] = useState(0);
@@ -151,6 +154,37 @@ export function ScaleOutLadderPanel({
   const [lots, setLots] = useState<LotInput[]>([{ ...EMPTY_LOT }, { ...EMPTY_LOT }]);
   const [preview, setPreview] = useState<TwsOrderPackagePreview | null>(null);
   const [submission, setSubmission] = useState<TwsOrderPackageSubmission | null>(null);
+
+  useEffect(() => {
+    if (!onChartLines) return;
+    const lines: PlanChartLine[] = [];
+    const entry = Number(limitPrice);
+    if (orderType === "LMT" && entry > 0) {
+      lines.push({
+        id: "ladder-entry", price: Math.round(entry * 100) / 100, kind: "entry", label: "Entry",
+        onDrag: (p) => setLimitPrice(String(p)),
+      });
+    }
+    lots.forEach((lot, i) => {
+      const tp = Number(lot.target_price);
+      if (tp > 0) {
+        lines.push({
+          id: `ladder-t${i}`, price: Math.round(tp * 100) / 100, kind: "target", label: `T${i + 1}`,
+          onDrag: (p) => setLots((ls) => ls.map((l, j) => (j === i ? { ...l, target_price: String(p) } : l))),
+        });
+      }
+      const sp = Number(lot.stop_price);
+      if (!lot.use_trail && sp > 0) {
+        lines.push({
+          id: `ladder-s${i}`, price: Math.round(sp * 100) / 100, kind: "stop", label: `S${i + 1}`,
+          onDrag: (p) => setLots((ls) => ls.map((l, j) => (j === i ? { ...l, stop_price: String(p) } : l))),
+        });
+      }
+    });
+    onChartLines(conid, lines);
+  }, [onChartLines, conid, orderType, limitPrice, lots]);
+
+  useEffect(() => () => onChartLines?.(0, []), [onChartLines]);
 
   const searchMutation = useMutation({
     mutationFn: (sym: string) => twsApi.searchInstruments(sym),
