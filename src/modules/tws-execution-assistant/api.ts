@@ -184,6 +184,7 @@ export interface InstrumentResult {
   primary_exchange: string;
   currency: string;
   local_symbol: string;
+  company_name: string;
 }
 
 export type MarketDataType =

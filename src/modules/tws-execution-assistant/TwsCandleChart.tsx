@@ -61,7 +61,7 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
       timeScale: { borderColor: theme.borderColor, timeVisible: true },
       rightPriceScale: { borderColor: theme.borderColor },
       crosshair: {
-        mode: CrosshairMode.Magnet,
+        mode: CrosshairMode.Normal,
         vertLine: { color: CROSSHAIR, style: LineStyle.Dashed, labelBackgroundColor: "#0f1724" },
         horzLine: { color: CROSSHAIR, style: LineStyle.Dashed, labelBackgroundColor: "#0f1724" },
       },
@@ -76,6 +76,9 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
       borderDownColor: theme.downColor,
       wickUpColor: theme.upColor,
       wickDownColor: theme.downColor,
+      // Neutral instead of the default last-bar-color so it doesn't compete
+      // with plan lines or read as another up/down signal.
+      priceLineColor: theme.text,
     });
 
     const vol = chart.addSeries(HistogramSeries, {

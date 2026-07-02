@@ -734,6 +734,7 @@ class TwsBrokerAdapter:
                 primary_exchange=getattr(d.contract, "primaryExchange", "") or "",
                 currency=d.contract.currency,
                 local_symbol=d.contract.localSymbol or d.contract.symbol,
+                company_name=getattr(d, "longName", "") or d.contract.symbol,
             )
             for d in details
         ]

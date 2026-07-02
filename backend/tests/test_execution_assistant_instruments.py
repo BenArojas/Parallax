@@ -75,6 +75,7 @@ def test_search_returns_results():
             primary_exchange="NASDAQ",
             currency="USD",
             local_symbol="NVDA",
+            company_name="NVIDIA Corp",
         )
     ]
     r = _client(search_results=results).get(

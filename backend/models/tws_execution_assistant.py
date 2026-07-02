@@ -114,6 +114,7 @@ class InstrumentResult(BaseModel):
     primary_exchange: str
     currency: str
     local_symbol: str
+    company_name: str
 
 
 MarketDataType = Literal[

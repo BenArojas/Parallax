@@ -389,6 +389,7 @@ export function TwsExecutionAssistantModule() {
   const [activeTimeframe, setActiveTimeframe] = useState<TwsTimeframe>("5m");
   const [showPlanLines, setShowPlanLines] = useState(true);
   const [selectedExchange, setSelectedExchange] = useState("");
+  const [selectedCompanyName, setSelectedCompanyName] = useState("");
   const [editingOrder, setEditingOrder] = useState<OrderSnapshot | null>(null);
   const [modifyForm, setModifyForm] = useState<TwsModifyOrderRequest>({ quantity: 1, limit_price: null, stop_price: null });
   const [modifyReview, setModifyReview] = useState(false);
@@ -664,6 +665,7 @@ export function TwsExecutionAssistantModule() {
       if (stk.length === 1) {
         setPlanForm((f) => ({ ...f, conid: stk[0].conid, limit_price: null, stop_price: null }));
         setSelectedExchange(stk[0].primary_exchange);
+        setSelectedCompanyName(stk[0].company_name);
         setSearchResults([]);
       }
     },
@@ -741,6 +743,7 @@ export function TwsExecutionAssistantModule() {
     setPlanForm((f) => ({ ...f, symbol: value.toUpperCase(), conid: 0, limit_price: null, stop_price: null }));
     setSearchResults([]);
     setSelectedExchange("");
+    setSelectedCompanyName("");
   }
 
   function runSearch() {
@@ -1439,6 +1442,7 @@ export function TwsExecutionAssistantModule() {
                   onInstrumentResolved={(instrument) => {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
+                    setSelectedCompanyName(instrument.company_name);
                   }}
                   onChartLines={handlePanelChartLines}
                 />
@@ -1450,6 +1454,7 @@ export function TwsExecutionAssistantModule() {
                   onInstrumentResolved={(instrument) => {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
+                    setSelectedCompanyName(instrument.company_name);
                   }}
                   onChartLines={handlePanelChartLines}
                 />
@@ -1461,6 +1466,7 @@ export function TwsExecutionAssistantModule() {
                   onInstrumentResolved={(instrument) => {
                     setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
                     setSelectedExchange(instrument.primary_exchange);
+                    setSelectedCompanyName(instrument.company_name);
                   }}
                 />
               ) : (
@@ -1499,6 +1505,7 @@ export function TwsExecutionAssistantModule() {
                                   onClick={() => {
                                     setPlanForm((f) => ({ ...f, conid: r.conid, limit_price: null, stop_price: null }));
                                     setSelectedExchange(r.primary_exchange || r.exchange);
+                                    setSelectedCompanyName(r.company_name);
                                     setSearchResults([]);
                                   }}
                                 >
@@ -1669,7 +1676,7 @@ export function TwsExecutionAssistantModule() {
                     <EntitlementGuidanceNote key={planForm.conid} reason={entitlementGuidanceReason} exchange={selectedExchange} />
                   ) : (
                     <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--clr-cyan)]">
-                      {planForm.symbol ? `${planForm.symbol} Chart` : "Chart"}
+                      {selectedCompanyName || planForm.symbol || "Chart"}
                     </h2>
                   )}
                   <div className="flex shrink-0 gap-0.5">
