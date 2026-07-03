@@ -1065,8 +1065,8 @@ export function TwsExecutionAssistantModule() {
               {status?.day_pnl == null ? (
                 <span className="text-[var(--text-3)]">Day P&L —</span>
               ) : (
-                <span className={`font-data font-medium ${status.day_pnl >= 0 ? "text-[var(--clr-green)]" : "text-[var(--clr-red)]"}`}>
-                  Day P&L {status.day_pnl >= 0 ? "+" : "-"}${Math.abs(status.day_pnl).toFixed(2)}
+                <span className={`font-data font-medium ${status.day_pnl > 0 ? "text-[var(--clr-green)]" : status.day_pnl < 0 ? "text-[var(--clr-red)]" : "text-[var(--text-1)]"}`}>
+                  Day P&L {status.day_pnl > 0 ? "+" : status.day_pnl < 0 ? "-" : ""}${Math.abs(status.day_pnl).toFixed(2)}
                 </span>
               )}
             </div>
