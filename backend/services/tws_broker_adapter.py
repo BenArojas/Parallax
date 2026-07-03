@@ -1156,14 +1156,22 @@ class TwsBrokerAdapter:
             if not (req.stop_price and req.stop_price > 0):
                 raise TwsPlaceOrderGuardError("invalid_stop_price")
 
-        updated = copy.copy(trade.order)
-        updated.totalQuantity = req.quantity
+        # Mutate trade.order in place rather than placeOrder()-ing a copy.copy().
+        # ib_async's IB.placeOrder() treats a matching orderId as a modify and
+        # returns the SAME tracked Trade — it does not copy the passed-in
+        # Order's fields onto trade.order itself (that only happens if/when
+        # TWS echoes the change back via an openOrder callback, which isn't
+        # reliable for a plain price/qty modify). Passing a detached copy left
+        # trade.order — the object get_reconciliation() reads — silently
+        # stuck on the pre-modify price: the modify reported success and TWS
+        # accepted it, but Orbit's own state never picked up the new price.
+        trade.order.totalQuantity = req.quantity
         if req.limit_price is not None:
-            updated.lmtPrice = req.limit_price
+            trade.order.lmtPrice = req.limit_price
         if req.stop_price is not None:
-            updated.auxPrice = req.stop_price
+            trade.order.auxPrice = req.stop_price
         if advanced_override:
-            updated.advancedErrorOverride = ",".join(advanced_override)
+            trade.order.advancedErrorOverride = ",".join(advanced_override)
 
         captured_rejects: list[TwsAdvancedReject] = []
 
@@ -1175,7 +1183,7 @@ class TwsBrokerAdapter:
 
         self._ib.errorEvent += _on_error
         try:
-            result = self._ib.placeOrder(trade.contract, updated)
+            result = self._ib.placeOrder(trade.contract, trade.order)
             await asyncio.sleep(0.3)
             if captured_rejects and result.orderStatus.status not in _ACCEPTED:
                 raise TwsAdvancedRejectError(captured_rejects[0])

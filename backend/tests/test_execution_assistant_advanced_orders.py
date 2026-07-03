@@ -426,3 +426,38 @@ def test_modify_order_refuses_oca_grouped_order_before_calling_placeorder():
     assert raised is not None
     assert raised.error_code == "oca_group_modify_unsupported"
     fake_ib.placeOrder.assert_not_called()
+
+
+def test_modify_order_mutates_tracked_trade_so_reconciliation_reflects_new_price():
+    """Regression: modify_order() used to placeOrder() a copy.copy() of
+    trade.order. ib_async's placeOrder() treats a matching orderId as a
+    modify and returns the SAME tracked Trade without copying the passed-in
+    Order's fields onto it — that only happens if/when TWS echoes the change
+    back via an openOrder callback, which isn't reliable for a plain price
+    modify. Passing a copy left trade.order (what get_reconciliation() reads)
+    stuck on the pre-modify price: the modify reported success and TWS
+    accepted it, but Orbit's own state never picked up the new price — the UI
+    would flash the new price optimistically, then revert it on refetch."""
+    adapter = TwsBrokerAdapter()
+    adapter._state = "connected"
+    adapter._connected_port = 4002  # paper port
+
+    order = SimpleNamespace(
+        orderId=100, orderType="STP", ocaGroup="", lmtPrice=0.0, auxPrice=300.0, totalQuantity=10.0,
+    )
+    contract = SimpleNamespace()
+    trade = SimpleNamespace(order=order, contract=contract, orderStatus=SimpleNamespace(status="PreSubmitted"))
+
+    fake_ib = MagicMock()
+    fake_ib.isConnected.return_value = True
+    fake_ib.openTrades.return_value = [trade]
+    fake_ib.placeOrder.return_value = trade  # ib_async's own modify-branch behavior
+    adapter._ib = fake_ib
+
+    req = TwsModifyOrderRequest(quantity=10, limit_price=None, stop_price=303.0)
+    asyncio.run(adapter.modify_order(100, req, mode="paper"))
+
+    # The object get_reconciliation() reads from openTrades() must already
+    # carry the new price — not rely on a TWS echo that may never arrive.
+    assert trade.order.auxPrice == 303.0
+    fake_ib.placeOrder.assert_called_once_with(contract, trade.order)
