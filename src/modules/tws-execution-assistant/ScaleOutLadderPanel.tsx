@@ -16,6 +16,7 @@ import type { PlanChartLine } from "./TwsCandleChart";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
 import { ScaleOutScenarioCalculator } from "./ScaleOutScenarioCalculator";
 import type { ScaleOutScenarioLot } from "./scaleOutScenario";
+import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
 
 interface LotInput {
   quantity: string;
@@ -130,6 +131,15 @@ function lotReadout(lot: LotInput): string | null {
       : null;
   if (!exit) return `sell ${qty} @ $${target.toFixed(2)}, then set a stop or trail`;
   return `sell ${qty} @ $${target.toFixed(2)}, ${exit}`;
+}
+
+function moneyInput(value: string): string {
+  const n = Number(value);
+  return n > 0 ? `$${n.toFixed(2)}` : "missing";
+}
+
+function quantityInput(value: number): string {
+  return value > 0 ? String(value) : "missing";
 }
 
 export function ScaleOutLadderPanel({
@@ -274,6 +284,78 @@ export function ScaleOutLadderPanel({
     stopPrice: l.use_trail ? null : Number(l.stop_price) || null,
     trailAmount: l.use_trail ? Number(l.trail_value) || null : null,
   }));
+  const displaySymbol = symbol || "symbol";
+  const entryText = orderType === "LMT" ? `LMT ${moneyInput(limitPrice)}` : "MKT";
+  const completeLots = lots.filter((lot) => {
+    const qty = Number(lot.quantity);
+    const target = Number(lot.target_price);
+    const protection = lot.use_trail ? Number(lot.trail_value) : Number(lot.stop_price);
+    return qty > 0 && target > 0 && protection > 0;
+  }).length;
+  const protectedLots = lots.filter((lot) => {
+    const protection = lot.use_trail ? Number(lot.trail_value) : Number(lot.stop_price);
+    return protection > 0;
+  }).length;
+  const anatomySteps: PlanAnatomyStep[] = [
+    {
+      tone: "blue",
+      label: "WHEN",
+      title: "Immediately after submit",
+      detail: "No condition gate. The ladder is ready once every lot can be previewed and submitted.",
+      metaLabel: "State",
+      metaValue: req ? "Ready" : "Draft",
+    },
+    {
+      tone: "cyan",
+      label: "ENTRY",
+      title: `BUY ${quantityInput(totalQty)} ${displaySymbol} · ${entryText}`,
+      detail: "Each lot gets its own parent entry so later exits stay isolated by lot.",
+      metaLabel: "Lots",
+      metaValue: `${lots.length}`,
+    },
+    ...lots.map<PlanAnatomyStep>((lot, index) => {
+      const qty = Number(lot.quantity);
+      const target = Number(lot.target_price);
+      const protection = lot.use_trail ? Number(lot.trail_value) : Number(lot.stop_price);
+      const complete = qty > 0 && target > 0 && protection > 0;
+      const protectionText = lot.use_trail
+        ? protection > 0 ? `trail $${protection.toFixed(2)}` : "trail missing"
+        : protection > 0 ? `stop ${moneyInput(lot.stop_price)}` : "stop missing";
+
+      return {
+        tone: complete ? "green" : "orange",
+        label: `L${index + 1}`,
+        title: `SELL ${quantityInput(qty)} ${displaySymbol} · LMT ${moneyInput(lot.target_price)}`,
+        detail: complete
+          ? `Target exit, ${protectionText}, and end-of-day MOC fallback stay linked inside this lot.`
+          : `Add quantity, target, and ${lot.use_trail ? "trail amount" : "stop"} before previewing this lot.`,
+        metaLabel: "Share",
+        metaValue: totalQty > 0 && qty > 0 ? `${Math.round((qty / totalQty) * 100)}%` : "Missing",
+      };
+    }),
+  ];
+  const anatomyEffects: PlanAnatomyEffect[] = [
+    {
+      label: "Broker effect",
+      value: req ? `${req.lots.length} isolated lots` : `${lots.length} draft lots`,
+      detail: "Each lot previews as its own entry plus linked exits.",
+      tone: "cyan",
+    },
+    {
+      label: "Cancel rule",
+      value: "Per-lot exits",
+      detail: "Target, protection, and fallback cancel each other only within the same lot.",
+      tone: "purple",
+    },
+    {
+      label: "Protection state",
+      value: req ? "Every lot covered" : `${protectedLots}/${lots.length} lots protected`,
+      detail: req
+        ? "A partial fill has its own target, protection, and close fallback."
+        : `${completeLots}/${lots.length} lots have quantity, target, and protection.`,
+      tone: req ? "green" : "orange",
+    },
+  ];
 
   if (preview) {
     return (
@@ -390,6 +472,14 @@ export function ScaleOutLadderPanel({
         >
           ↻ Try an example: 20 shares, 3 stages
         </button>
+
+        <PlanAnatomyPanel
+          title="Scale-out ladder logic"
+          subtitle="The chart shows entry, target, and fixed-stop prices. This explains lot isolation, cancel rules, and protection."
+          badge={req ? "Ready to preview" : "Draft incomplete"}
+          steps={anatomySteps}
+          effects={anatomyEffects}
+        />
 
         <div className="grid gap-3 md:grid-cols-4">
           <label className="space-y-1.5 md:col-span-2">

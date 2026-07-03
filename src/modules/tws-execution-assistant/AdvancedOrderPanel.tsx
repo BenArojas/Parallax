@@ -13,6 +13,7 @@ import {
   type TwsOrderPackageSubmission,
 } from "./api";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
+import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
 
 type AdvancedKind = "trailing_stop" | "gtd" | "moc" | "loc" | "price_condition";
 type TrailOrderType = "TRAIL" | "TRAILLMT";
@@ -47,6 +48,26 @@ function priceConditionSummary(preview: TwsOrderPackagePreview): string | null {
     ? `LMT at $${leg.limit_price.toFixed(2)}`
     : leg.order_type;
   return `Wait for ${preview.symbol} ${direction} $${leg.condition_price.toFixed(2)}, then submit ${leg.side} ${leg.quantity} ${orderDesc}.`;
+}
+
+function moneyInput(value: string): string {
+  const n = Number(value);
+  return n > 0 ? `$${n.toFixed(2)}` : "missing";
+}
+
+function quantityInput(value: string): string {
+  const n = Number(value);
+  return n > 0 ? String(n) : "missing";
+}
+
+function trailInput(mode: "amount" | "percent", value: string): string {
+  const n = Number(value);
+  if (n <= 0) return "missing";
+  return mode === "percent" ? `${n.toFixed(2)}%` : `$${n.toFixed(2)}`;
+}
+
+function displayDateTime(value: string): string {
+  return value ? value.replace("T", " ") : "missing";
 }
 
 function errorCode(err: unknown): string | null {
@@ -284,6 +305,164 @@ export function AdvancedOrderPanel({
     limitPrice, stopPrice, trailMode, trailValue, limitOffset, goodTillDate,
     pcOrderType, conditionIsAbove, conditionPrice,
   });
+  const displaySymbol = symbol || "symbol";
+  const conditionDirection = conditionIsAbove ? "above" : "below";
+  const draftReason = (() => {
+    if (!symbol) return "Enter a symbol.";
+    if (!conid) return "Resolve symbol to get ConID.";
+    if (!Number(quantity)) return "Enter quantity.";
+    if (kind === "loc" && !Number(limitPrice)) return "Enter limit price.";
+    if (kind === "price_condition") {
+      if (!Number(conditionPrice)) return "Enter condition price.";
+      if (pcOrderType === "LMT" && !Number(limitPrice)) return "Enter limit price.";
+      return null;
+    }
+    if (kind === "trailing_stop") {
+      if (!Number(trailValue)) return "Enter trail value.";
+      if (trailOrderType === "TRAILLMT" && !Number(limitOffset)) return "Enter limit offset.";
+      return null;
+    }
+    if (kind === "gtd") {
+      if (!formatGoodTillDate(goodTillDate)) return "Enter good-till date.";
+      if ((gtdOrderType === "LMT" || gtdOrderType === "STP LMT") && !Number(limitPrice)) return "Enter limit price.";
+      if ((gtdOrderType === "STP" || gtdOrderType === "STP LMT") && !Number(stopPrice)) return "Enter stop price.";
+      if ((gtdOrderType === "TRAIL" || gtdOrderType === "TRAILLMT") && !Number(trailValue)) return "Enter trail value.";
+      if (gtdOrderType === "TRAILLMT" && !Number(limitOffset)) return "Enter limit offset.";
+    }
+    return null;
+  })();
+  const orderText = (() => {
+    if (kind === "moc") return "MOC";
+    if (kind === "loc") return `LOC ${moneyInput(limitPrice)}`;
+    if (kind === "price_condition") return pcOrderType === "LMT" ? `LMT ${moneyInput(limitPrice)}` : "MKT";
+    if (kind === "trailing_stop") {
+      return `${trailOrderType} trail ${trailInput(trailMode, trailValue)}${trailOrderType === "TRAILLMT" ? ` · offset ${moneyInput(limitOffset)}` : ""}`;
+    }
+    if (gtdOrderType === "LMT") return `GTD LMT ${moneyInput(limitPrice)}`;
+    if (gtdOrderType === "STP") return `GTD STP ${moneyInput(stopPrice)}`;
+    if (gtdOrderType === "STP LMT") return `GTD STP LMT stop ${moneyInput(stopPrice)} · limit ${moneyInput(limitPrice)}`;
+    return `GTD ${gtdOrderType} trail ${trailInput(trailMode, trailValue)}${gtdOrderType === "TRAILLMT" ? ` · offset ${moneyInput(limitOffset)}` : ""}`;
+  })();
+  const timingStep: PlanAnatomyStep = (() => {
+    if (kind === "price_condition") {
+      return {
+        tone: Number(conditionPrice) > 0 ? "blue" : "orange",
+        label: "WHEN",
+        title: `${displaySymbol} trades ${conditionDirection} ${moneyInput(conditionPrice)}`,
+        detail: "TWS holds the condition. The order submits only after this single price gate is met.",
+        metaLabel: "State",
+        metaValue: req ? "Ready" : "Draft",
+      };
+    }
+    if (kind === "moc" || kind === "loc") {
+      return {
+        tone: "blue",
+        label: "WHEN",
+        title: "Closing auction",
+        detail: "The order is intended for the market close rather than immediate continuous trading.",
+        metaLabel: "State",
+        metaValue: req ? "Ready" : "Draft",
+      };
+    }
+    if (kind === "gtd") {
+      return {
+        tone: formatGoodTillDate(goodTillDate) ? "blue" : "orange",
+        label: "WHEN",
+        title: `Good till ${displayDateTime(goodTillDate)}`,
+        detail: "The order can keep working until this local date/time, unless it fills or is canceled first.",
+        metaLabel: "State",
+        metaValue: req ? "Ready" : "Draft",
+      };
+    }
+    return {
+      tone: "blue",
+      label: "WHEN",
+      title: "Immediately after submit",
+      detail: "No condition gate. The trailing stop starts tracking once it is accepted by TWS.",
+      metaLabel: "State",
+      metaValue: req ? "Ready" : "Draft",
+    };
+  })();
+  const behaviorStep: PlanAnatomyStep = (() => {
+    if (kind === "price_condition") {
+      return {
+        tone: Number(conditionPrice) > 0 ? "purple" : "orange",
+        label: "GATE",
+        title: `Condition ${conditionDirection} ${moneyInput(conditionPrice)}`,
+        detail: "This is a broker-side condition, not an Orbit background watcher.",
+        metaLabel: "Trigger",
+        metaValue: "Last trade",
+      };
+    }
+    if (kind === "trailing_stop") {
+      return {
+        tone: Number(trailValue) > 0 ? "green" : "orange",
+        label: "TRAIL",
+        title: `${trailInput(trailMode, trailValue)} ${trailMode === "percent" ? "trail" : "trail amount"}`,
+        detail: side === "SELL"
+          ? "For a sell, the trigger trails below rising highs and fires after a pullback."
+          : "For a buy, the trigger trails above falling lows and fires after a bounce.",
+        metaLabel: "Type",
+        metaValue: trailOrderType,
+      };
+    }
+    if (kind === "gtd") {
+      return {
+        tone: draftReason == null ? "green" : "orange",
+        label: "EXPIRE",
+        title: `Auto-cancel after ${displayDateTime(goodTillDate)}`,
+        detail: "The order remains normal broker risk while working; GTD only controls its expiration.",
+        metaLabel: "TIF",
+        metaValue: "GTD",
+      };
+    }
+    return {
+      tone: kind === "moc" || req ? "green" : "orange",
+      label: "CLOSE",
+      title: kind === "moc" ? "Market-on-close" : `Limit-on-close ${moneyInput(limitPrice)}`,
+      detail: kind === "moc"
+        ? "MOC seeks execution in the closing auction without a limit cap."
+        : "LOC participates at the close only if the closing price satisfies your limit.",
+      metaLabel: "TIF",
+      metaValue: "Close",
+    };
+  })();
+  const anatomySteps: PlanAnatomyStep[] = [
+    timingStep,
+    {
+      tone: "cyan",
+      label: "ORDER",
+      title: `${side} ${quantityInput(quantity)} ${displaySymbol} · ${orderText}`,
+      detail: "Advanced mode still previews one broker order before any placement.",
+      metaLabel: "Mode",
+      metaValue: KIND_LABEL[kind],
+    },
+    behaviorStep,
+  ];
+  const anatomyEffects: PlanAnatomyEffect[] = [
+    {
+      label: "Broker effect",
+      value: "1 advanced order",
+      detail: "No bracket target, scale-out lot, or child protection is added here.",
+      tone: "cyan",
+    },
+    {
+      label: kind === "price_condition" ? "Condition owner" : "Timing owner",
+      value: kind === "price_condition" ? "TWS gate" : kind === "gtd" ? "TWS expiry" : kind === "moc" || kind === "loc" ? "Close auction" : "Trail engine",
+      detail: kind === "price_condition"
+        ? "Orbit sends the condition; TWS evaluates the trigger."
+        : "Orbit previews the request; broker handling starts after submit.",
+      tone: "blue",
+    },
+    {
+      label: "Review gate",
+      value: draftReason ?? "Ready to preview",
+      detail: draftReason == null
+        ? "Preview uses the existing package preview flow before placement."
+        : "The Preview button stays disabled until this is fixed.",
+      tone: draftReason == null ? "green" : "orange",
+    },
+  ];
 
   if (preview) {
     return (
@@ -474,15 +653,16 @@ export function AdvancedOrderPanel({
           </label>
         </div>
 
+        <PlanAnatomyPanel
+          title={`${KIND_LABEL[kind]} logic`}
+          subtitle="This explains timing, broker ownership, and the preview gate without adding a second price map."
+          badge={req ? "Ready to preview" : "Draft incomplete"}
+          steps={anatomySteps}
+          effects={anatomyEffects}
+        />
+
         {kind === "trailing_stop" && (
           <>
-            <div className="rounded border border-[var(--clr-blue)]/25 bg-[var(--glow-blue)] px-4 py-3 text-xs leading-5 text-[var(--text-2)]">
-              A trailing stop's trigger price follows the market in your favor, then locks in and
-              fires once price reverses by your trail amount. Selling: it trails below the highs
-              and fires if price drops back down. Buying a stock you don't own yet: it trails above
-              the lows as price keeps falling, then fires once price bounces back up — a way to
-              catch a reversal without having to guess the exact bottom.
-            </div>
             <div className="grid gap-3 md:grid-cols-4">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
@@ -654,11 +834,6 @@ export function AdvancedOrderPanel({
 
         {kind === "price_condition" && (
           <>
-            <div className="rounded border border-[var(--clr-blue)]/25 bg-[var(--glow-blue)] px-4 py-3 text-xs leading-5 text-[var(--text-2)]">
-              Waits and watches — the order only submits once the last trade trades above or
-              below the price you set. One condition only, no autonomous market watching beyond
-              this single check.
-            </div>
             <div className="grid gap-3 md:grid-cols-4">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-[var(--text-2)]">Condition</span>

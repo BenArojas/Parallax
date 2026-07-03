@@ -4,7 +4,7 @@
 
 **Goal:** Add a compact Plan Anatomy surface so Execution Plan explains order logic while the existing TWS chart keeps price-level visualization.
 
-**Architecture:** Keep the slice frontend-only. Create one reusable anatomy presentation component, wire it into `BracketBuilderPanel` and Standard draft mode, and derive copy from existing local state. Do not change package preview/submit contracts.
+**Architecture:** Keep the slice frontend-only. Create one reusable anatomy presentation component, wire it into Standard, Bracket, Scale-Out, and Advanced draft modes, and derive copy from existing local state. Do not change package preview/submit contracts.
 
 **Tech Stack:** React 19, TypeScript, Tailwind v4 utility classes, existing Orbit CSS variables, existing `twsApi` package endpoints.
 
@@ -13,8 +13,8 @@
 - The TWS chart remains the only visual price-level surface; do not add a mini price map.
 - No backend, API, broker, persistence, or live-trading policy changes.
 - Use existing Orbit CSS variables: `--clr-*`, `--glow-*`, `--bg-*`, `--text-*`, `--border`.
-- First slice was bracket mode only and is complete.
-- Second slice is standard mode only; stop after it is verified.
+- Completed slices: Bracket, Standard, Scale-Out, and Advanced.
+- Optional Advanced chart-line support is deferred until condition/close/trailing line semantics are designed for the real chart.
 - Per `docs/testing.md`, no new tests are required because this does not alter a critical trading promise.
 
 ---
@@ -28,6 +28,15 @@
   - Imports `PlanAnatomyPanel`.
   - Builds bracket anatomy from existing local form state.
   - Places the anatomy panel under the bracket intro copy and above the input grid.
+- Modify `src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx`
+  - Builds Standard anatomy from existing `planForm` and draft validation.
+  - Places the anatomy panel under the Standard field grid.
+- Modify `src/modules/tws-execution-assistant/ScaleOutLadderPanel.tsx`
+  - Builds Scale-Out anatomy from existing entry/lot state.
+  - Places the anatomy panel before the ladder inputs.
+- Modify `src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx`
+  - Builds subtype-specific anatomy for Trailing Stop, GTD, MOC, LOC, and Price Condition.
+  - Replaces long explanatory callouts with operational anatomy.
 - Modify `PROJECT_PLAN.md`
   - Records the UI follow-up before coding begins and marks it complete after verification.
 
@@ -217,9 +226,7 @@ git commit -m "feat: add tws bracket plan anatomy"
 
 ## Follow-Up Issues, Not Part Of This Slice
 
-- Adapt anatomy for Scale-Out stages/lots, using existing scenario/protection data.
-- Add `onChartLines` support to `AdvancedOrderPanel` only if advanced-mode price context needs to appear on the real chart.
-- Add Price Condition anatomy with a `WHEN` condition gate.
+- Add `onChartLines` support to `AdvancedOrderPanel` only after condition/close/trailing chart-line semantics are explicitly designed.
 
 ## Task 2: Standard Plan Anatomy Follow-Up
 
@@ -237,8 +244,38 @@ git commit -m "feat: add tws bracket plan anatomy"
 - [x] Render the panel under the Standard input grid and before derived notional value.
 - [x] Verify with `npm run typecheck`, `git diff --check`, and focused TWS frontend package tests.
 
+## Task 3: Scale-Out Plan Anatomy Follow-Up
+
+**Files:**
+- Modify: `src/modules/tws-execution-assistant/ScaleOutLadderPanel.tsx`
+
+**Interfaces:**
+- Consumes: existing Scale-Out draft state (`symbol`, `conid`, `orderType`, `limitPrice`, `lots`) and existing request readiness (`req`).
+- Produces: a read-only anatomy panel rendered inside Scale-Out draft mode before preview.
+
+- [x] Reuse `PlanAnatomyPanel`; do not create a second component.
+- [x] Derive `WHEN`, `ENTRY`, per-lot exit/protection/fallback rows, broker effect, cancel rule, and protection state from existing ladder state.
+- [x] Render the panel before the Scale-Out input grid.
+- [x] Keep existing chart lines as the only price-line visualization.
+- [x] Verify with `npm run typecheck` and focused TWS frontend package tests.
+
+## Task 4: Advanced Plan Anatomy Follow-Up
+
+**Files:**
+- Modify: `src/modules/tws-execution-assistant/AdvancedOrderPanel.tsx`
+
+**Interfaces:**
+- Consumes: existing Advanced draft state and existing `buildRequest` readiness.
+- Produces: a read-only anatomy panel rendered inside Advanced draft mode before preview.
+
+- [x] Reuse `PlanAnatomyPanel`; do not create a second component.
+- [x] Derive subtype-specific `WHEN`, `ORDER`, behavior, broker owner, and review gate copy for Trailing Stop, GTD, MOC, LOC, and Price Condition.
+- [x] Replace the older Trailing Stop and Price Condition prose callouts with anatomy instead of stacking explanations.
+- [x] Include the Price Condition `WHEN` gate without adding a duplicate price map.
+- [x] Verify with `npm run typecheck` and focused TWS frontend package tests.
+
 ## Self-Review
 
-- Spec coverage: covered Plan Anatomy, chart-line non-duplication, bracket-first and Standard follow-up tracers, no backend/API changes, and verification.
+- Spec coverage: covered Plan Anatomy, chart-line non-duplication, Standard/Bracket/Scale-Out/Advanced draft modes, no backend/API changes, and verification.
 - Placeholder scan: no `TBD`, `TODO`, or unspecified implementation steps.
 - Type consistency: `PlanAnatomyStep`, `PlanAnatomyEffect`, and `PlanAnatomyPanelProps` are defined before use.
