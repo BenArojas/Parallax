@@ -493,19 +493,6 @@ export function TwsExecutionAssistantModule() {
   const handlePanelReviewLocked = useCallback((locked: boolean) => setPanelReviewLocked(locked), []);
   const reviewLocked = standardReviewLocked || panelReviewLocked;
 
-  const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
-  const panelLinesMatch = panelChart.conid > 0 && panelChart.conid === planForm.conid;
-  const editingLinesMatch = editingOrder != null && editingOrder.conid === planForm.conid;
-  const chartLines = !showPlanLines ? EMPTY_LINES
-    : editingOrder != null ? (editingLinesMatch ? modifyPlanLines : EMPTY_LINES)
-    : planMode === "standard" ? standardPlanLines
-    : (planMode === "scale_out" || planMode === "bracket") && panelLinesMatch ? panelChart.lines
-    : EMPTY_LINES;
-  const panelLinesMismatch =
-    showPlanLines && (planMode === "scale_out" || planMode === "bracket") &&
-    panelChart.lines.length > 0 && !panelLinesMatch;
-  const editingLinesMismatch = showPlanLines && editingOrder != null && !editingLinesMatch;
-
   const { data: status } = useQuery({
     queryKey: STATUS_KEY,
     queryFn: twsApi.getStatus,
@@ -525,6 +512,84 @@ export function TwsExecutionAssistantModule() {
   const { packages: bracketPackages, standaloneOrders } = groupBracketOrders(afterScaleOut, recon?.package_warnings ?? []);
   const managedScaleOutPackage = scaleOutPackages.find((p) => p.packageId === managedScaleOutPackageId) ?? null;
   const managedBracketPackage = bracketPackages.find((p) => p.packageId === managedBracketPackageId) ?? null;
+
+  // View-only reference lines for an already-placed package's real orders —
+  // shown while Manage Scale-Out/Bracket is open so the chart still gives
+  // context, but never draggable (no per-leg price editing is offered from
+  // here; trail-based exits have no fixed price, so they get no line).
+  const managedScaleOutLines = useMemo<PlanChartLine[]>(() => {
+    if (!managedScaleOutPackage) return [];
+    const lines: PlanChartLine[] = [];
+    for (const lot of managedScaleOutPackage.lots) {
+      if (lot.entry?.lmt_price) {
+        lines.push({
+          id: `managed-scaleout-entry${lot.lotIndex}`, price: lot.entry.lmt_price, kind: "entry", label: `E${lot.lotIndex + 1}`,
+          onDrag: () => {}, locked: true,
+        });
+      }
+      for (const exit of lot.exits) {
+        const role = parseScaleOutOrderRef(exit.order_ref)?.roleType;
+        if (role === "target" && exit.lmt_price) {
+          lines.push({
+            id: `managed-scaleout-t${lot.lotIndex}`, price: exit.lmt_price, kind: "target", label: `T${lot.lotIndex + 1}`,
+            onDrag: () => {}, locked: true,
+          });
+        } else if (role === "stop" && exit.stop_price) {
+          lines.push({
+            id: `managed-scaleout-s${lot.lotIndex}`, price: exit.stop_price, kind: "stop", label: `S${lot.lotIndex + 1}`,
+            onDrag: () => {}, locked: true,
+          });
+        }
+      }
+    }
+    return lines;
+  }, [managedScaleOutPackage]);
+
+  const managedBracketLines = useMemo<PlanChartLine[]>(() => {
+    if (!managedBracketPackage) return [];
+    const lines: PlanChartLine[] = [];
+    if (managedBracketPackage.parent?.lmt_price) {
+      lines.push({
+        id: "managed-bracket-entry", price: managedBracketPackage.parent.lmt_price, kind: "entry", label: "Entry",
+        onDrag: () => {}, locked: true,
+      });
+    }
+    if (managedBracketPackage.target?.lmt_price) {
+      lines.push({
+        id: "managed-bracket-target", price: managedBracketPackage.target.lmt_price, kind: "target", label: "Target",
+        onDrag: () => {}, locked: true,
+      });
+    }
+    const exitRole = parseBracketOrderRef(managedBracketPackage.exit?.order_ref ?? null)?.roleType;
+    if (exitRole === "stop" && managedBracketPackage.exit?.stop_price) {
+      lines.push({
+        id: "managed-bracket-stop", price: managedBracketPackage.exit.stop_price, kind: "stop", label: "Stop",
+        onDrag: () => {}, locked: true,
+      });
+    }
+    return lines;
+  }, [managedBracketPackage]);
+
+  const EMPTY_LINES: PlanChartLine[] = useMemo(() => [], []);
+  const panelLinesMatch = panelChart.conid > 0 && panelChart.conid === planForm.conid;
+  const editingLinesMatch = editingOrder != null && editingOrder.conid === planForm.conid;
+  const managedScaleOutLinesMatch = managedScaleOutPackage != null && managedScaleOutPackage.conid === planForm.conid;
+  const managedBracketLinesMatch = managedBracketPackage != null && managedBracketPackage.conid === planForm.conid;
+  const chartLines = !showPlanLines ? EMPTY_LINES
+    : managedScaleOutPackage != null ? (managedScaleOutLinesMatch ? managedScaleOutLines : EMPTY_LINES)
+    : managedBracketPackage != null ? (managedBracketLinesMatch ? managedBracketLines : EMPTY_LINES)
+    : editingOrder != null ? (editingLinesMatch ? modifyPlanLines : EMPTY_LINES)
+    : planMode === "standard" ? standardPlanLines
+    : (planMode === "scale_out" || planMode === "bracket") && panelLinesMatch ? panelChart.lines
+    : EMPTY_LINES;
+  const panelLinesMismatch =
+    showPlanLines && (planMode === "scale_out" || planMode === "bracket") &&
+    panelChart.lines.length > 0 && !panelLinesMatch;
+  const editingLinesMismatch = showPlanLines && editingOrder != null && !editingLinesMatch;
+  const managedPackageLinesMismatch =
+    showPlanLines &&
+    ((managedScaleOutPackage != null && !managedScaleOutLinesMatch) ||
+      (managedBracketPackage != null && !managedBracketLinesMatch));
 
   const connectMutation = useMutation({
     mutationFn: twsApi.connect,
@@ -1804,6 +1869,11 @@ export function TwsExecutionAssistantModule() {
                 {editingLinesMismatch && (
                   <p className="mt-1 text-[9px] text-[var(--text-3)]">
                     Plan lines hidden — the order being modified is a different symbol than the charted one.
+                  </p>
+                )}
+                {managedPackageLinesMismatch && (
+                  <p className="mt-1 text-[9px] text-[var(--text-3)]">
+                    Plan lines hidden — this package&apos;s symbol differs from the charted symbol.
                   </p>
                 )}
               </div>
