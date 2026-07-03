@@ -46,6 +46,11 @@ export interface PositionSnapshot {
   symbol: string;
   position: number;
   avg_cost: number;
+  market_price: number | null;
+  market_value: number | null;
+  unrealized_pnl: number | null;
+  realized_pnl: number | null;
+  daily_pnl: number | null;
 }
 
 export interface OrderSnapshot {

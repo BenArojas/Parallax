@@ -28,10 +28,11 @@ export interface PlanChartLine {
   locked?: boolean;                   // reviewed/submitted — line stays visible but is not draggable
 }
 
-export function TwsCandleChart({ bars, liveBar, planLines }: {
+export function TwsCandleChart({ bars, liveBar, planLines, avgCostPrice }: {
   bars: BarSnapshot[];
   liveBar?: BarSnapshot | null;
   planLines?: PlanChartLine[];
+  avgCostPrice?: number | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef  = useRef<IChartApi | null>(null);
@@ -40,6 +41,7 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
   const priceLinesRef = useRef<Map<string, { line: IPriceLine; price: number }>>(new Map());
   const planLinesRef  = useRef<PlanChartLine[]>([]);
   const draggingIdRef = useRef<string | null>(null);
+  const avgCostLineRef = useRef<IPriceLine | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -173,6 +175,7 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
       chart.remove();
       chartRef.current = candleRef.current = volRef.current = null;
       priceLinesRef.current.clear();
+      avgCostLineRef.current = null;
     };
   }, []);
 
@@ -258,6 +261,37 @@ export function TwsCandleChart({ bars, liveBar, planLines }: {
       }
     }
   }, [planLines]);
+
+  // Avg-cost line: neutral color/dashed style to match the candle series'
+  // built-in last-price line, but drawn separately since it must stay visible
+  // independent of planLines (and isn't draggable).
+  useEffect(() => {
+    const candle = candleRef.current;
+    if (!candle) return;
+    const existing = avgCostLineRef.current;
+
+    if (avgCostPrice == null) {
+      if (existing) {
+        candle.removePriceLine(existing);
+        avgCostLineRef.current = null;
+      }
+      return;
+    }
+
+    if (existing) {
+      existing.applyOptions({ price: avgCostPrice });
+    } else {
+      const theme = readChartTheme();
+      avgCostLineRef.current = candle.createPriceLine({
+        price: avgCostPrice,
+        color: theme.text,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: "Avg",
+      });
+    }
+  }, [avgCostPrice]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

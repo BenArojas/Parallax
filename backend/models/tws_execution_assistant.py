@@ -60,6 +60,11 @@ class PositionSnapshot(BaseModel):
     symbol: str
     position: float
     avg_cost: float
+    market_price: float | None = None
+    market_value: float | None = None
+    unrealized_pnl: float | None = None
+    realized_pnl: float | None = None
+    daily_pnl: float | None = None
 
 
 class OrderSnapshot(BaseModel):

@@ -11,7 +11,7 @@ from datetime import date as date_, datetime, timezone
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
-from ib_async import IB, Contract, Order, PriceCondition
+from ib_async import IB, Contract, Order, PnLSingle, PriceCondition
 from starlette.websockets import WebSocketState
 
 from models.broker_session import BrokerSessionMode
@@ -140,6 +140,11 @@ def _lmt_price(val: float) -> float | None:
     return val if val and 0 < val < _IBKR_UNSET else None
 
 
+def _nan_to_none(v: float) -> float | None:
+    """ib_async reports unset portfolio/PnL floats as nan."""
+    return None if v is None or math.isnan(v) else v
+
+
 def _order_stop_price(order: Order) -> float | None:
     return _lmt_price(getattr(order, "auxPrice", None))
 
@@ -178,6 +183,7 @@ class TwsBrokerAdapter:
         self._bar_streams: dict[tuple[int, str], dict[str, object]] = {}
         self._depth_streams: dict[int, dict[str, object]] = {}
         self._recon_changed_task: asyncio.Task | None = None
+        self._pnl_singles: dict[int, PnLSingle] = {}
 
         async def _on_connected(*_args: object) -> None:
             await self._broadcast_stream_status(True)
@@ -185,6 +191,7 @@ class TwsBrokerAdapter:
         async def _on_disconnected(*_args: object) -> None:
             await self._broadcast_stream_status(False)
             self._clear_stream_registry()
+            self._pnl_singles.clear()
 
         def _on_recon_changed(*_args: object) -> None:
             if self._recon_changed_task is not None and not self._recon_changed_task.done():
@@ -877,15 +884,40 @@ class TwsBrokerAdapter:
         if not self._ib.isConnected():
             return ReconciliationSnapshot()
 
-        positions = [
-            PositionSnapshot(
-                conid=p.contract.conId,
-                symbol=p.contract.symbol,
-                position=p.position,
-                avg_cost=p.avgCost,
+        raw_positions = self._ib.positions()
+        held_conids = {p.contract.conId for p in raw_positions}
+        portfolio_by_conid = {item.contract.conId: item for item in self._ib.portfolio()}
+
+        # Daily P&L: lazy sync-on-recon against reqPnLSingle subscriptions, no
+        # dedicated event lifecycle. First read after subscribing is None until
+        # the ~1s-later async update lands; the next recon fills it in.
+        accounts = self._ib.managedAccounts()
+        if accounts:
+            account = accounts[0]
+            for conid in held_conids - self._pnl_singles.keys():
+                self._pnl_singles[conid] = self._ib.reqPnLSingle(account, "", conid)
+            for conid in self._pnl_singles.keys() - held_conids:
+                self._ib.cancelPnLSingle(account, "", conid)
+                self._pnl_singles.pop(conid, None)
+
+        positions = []
+        for p in raw_positions:
+            conid = p.contract.conId
+            item = portfolio_by_conid.get(conid)
+            pnl_single = self._pnl_singles.get(conid)
+            positions.append(
+                PositionSnapshot(
+                    conid=conid,
+                    symbol=p.contract.symbol,
+                    position=p.position,
+                    avg_cost=p.avgCost,
+                    market_price=_nan_to_none(item.marketPrice) if item else None,
+                    market_value=_nan_to_none(item.marketValue) if item else None,
+                    unrealized_pnl=_nan_to_none(item.unrealizedPNL) if item else None,
+                    realized_pnl=_nan_to_none(item.realizedPNL) if item else None,
+                    daily_pnl=_nan_to_none(pnl_single.dailyPnL) if pnl_single else None,
+                )
             )
-            for p in self._ib.positions()
-        ]
 
         open_orders = [
             OrderSnapshot(

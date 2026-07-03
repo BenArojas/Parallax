@@ -6,7 +6,7 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { BROKER_SESSION_KEY } from "@/context/BrokerSessionContext";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
-import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
+import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type PositionSnapshot, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { OrderRow } from "./OrderRow";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
@@ -309,6 +309,21 @@ function packageLegPrice(order: OrderSnapshot): string {
   if (order.stop_price != null) return order.stop_price.toFixed(2);
   if (order.lmt_price != null) return order.lmt_price.toFixed(2);
   return "—";
+}
+
+/** How much of a position has an open exit order (opposite-side order for the
+ * same conid) covering it. Purely a Positions-table display heuristic — it
+ * doesn't know about OCA groups or partial fills, just sums exit quantity. */
+function positionProtection(position: PositionSnapshot, openOrders: OrderSnapshot[]): {
+  covered: number;
+  needed: number;
+} {
+  const exitSide = position.position > 0 ? "SELL" : "BUY";
+  const needed = Math.abs(position.position);
+  const covered = openOrders
+    .filter((o) => o.conid === position.conid && o.side === exitSide)
+    .reduce((sum, o) => sum + o.quantity, 0);
+  return { covered, needed };
 }
 
 /** Scale-out legs are a linked package, not independent orders — no per-leg
@@ -618,6 +633,7 @@ export function TwsExecutionAssistantModule() {
     : planMode === "standard" ? standardPlanLines
     : (planMode === "scale_out" || planMode === "bracket") && panelLinesMatch ? panelChart.lines
     : EMPTY_LINES;
+  const chartedPosition = recon?.positions.find((p) => p.conid === planForm.conid) ?? null;
   const panelLinesMismatch =
     showPlanLines && (planMode === "scale_out" || planMode === "bracket") &&
     panelChart.lines.length > 0 && !panelLinesMatch;
@@ -1877,7 +1893,12 @@ export function TwsExecutionAssistantModule() {
                       Loading bars…
                     </div>
                   ) : barsData && barsData.bars.length > 0 ? (
-                    <TwsCandleChart bars={barsData.bars} liveBar={liveBar} planLines={chartLines} />
+                    <TwsCandleChart
+                      bars={barsData.bars}
+                      liveBar={liveBar}
+                      planLines={chartLines}
+                      avgCostPrice={showPlanLines && chartedPosition ? chartedPosition.avg_cost : null}
+                    />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-center">
                       <div>
@@ -1907,22 +1928,59 @@ export function TwsExecutionAssistantModule() {
                 <thead>
                   <tr className="text-xs text-[var(--text-3)]">
                     <th className="pb-1.5 pr-4 font-medium">Symbol</th>
-                    <th className="pb-1.5 pr-4 font-medium">ConID</th>
                     <th className="pb-1.5 pr-4 font-medium">Position</th>
-                    <th className="pb-1.5 font-medium">Avg Cost</th>
+                    <th className="pb-1.5 pr-4 font-medium">Avg Cost</th>
+                    <th className="pb-1.5 pr-4 font-medium">Mkt Price</th>
+                    <th className="pb-1.5 pr-4 font-medium">Daily P&L</th>
+                    <th className="pb-1.5 pr-4 font-medium">Unrl P&L</th>
+                    <th className="pb-1.5 pr-4 font-medium">Unrl %</th>
+                    <th className="pb-1.5 font-medium">Protection</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {recon.positions.map((p) => (
-                    <tr key={p.conid} className="border-t border-border">
-                      <td className="py-1.5 pr-4 font-medium">{p.symbol}</td>
-                      <td className="pr-4 font-data text-[var(--text-2)]">{p.conid}</td>
-                      <td className={`pr-4 font-data ${p.position < 0 ? "text-[var(--clr-red)]" : ""}`}>
-                        {p.position}
-                      </td>
-                      <td className="font-data text-[var(--text-2)]">{p.avg_cost.toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {recon.positions.map((p) => {
+                    const pnlClass = (v: number | null) =>
+                      v == null ? "" : v > 0 ? "text-[var(--clr-green)]" : v < 0 ? "text-[var(--clr-red)]" : "";
+                    const unrlPct =
+                      p.unrealized_pnl != null && p.avg_cost > 0 && p.position !== 0
+                        ? (p.unrealized_pnl / (p.avg_cost * Math.abs(p.position))) * 100
+                        : null;
+                    const { covered, needed } = positionProtection(p, recon.open_orders);
+                    return (
+                      <tr
+                        key={p.conid}
+                        onClick={() => pointChartAt(p.conid, p.symbol)}
+                        className="cursor-pointer border-t border-border hover:bg-[var(--bg-1)]"
+                      >
+                        <td className="py-1.5 pr-4 font-medium">{p.symbol}</td>
+                        <td className={`pr-4 font-data ${p.position < 0 ? "text-[var(--clr-red)]" : ""}`}>
+                          {p.position}
+                        </td>
+                        <td className="pr-4 font-data text-[var(--text-2)]">{p.avg_cost.toFixed(2)}</td>
+                        <td className="pr-4 font-data text-[var(--text-2)]">
+                          {p.market_price != null ? p.market_price.toFixed(2) : "—"}
+                        </td>
+                        <td className={`pr-4 font-data ${pnlClass(p.daily_pnl)}`}>
+                          {p.daily_pnl != null ? p.daily_pnl.toFixed(2) : "—"}
+                        </td>
+                        <td className={`pr-4 font-data ${pnlClass(p.unrealized_pnl)}`}>
+                          {p.unrealized_pnl != null ? p.unrealized_pnl.toFixed(2) : "—"}
+                        </td>
+                        <td className={`pr-4 font-data ${pnlClass(unrlPct)}`}>
+                          {unrlPct != null ? `${unrlPct.toFixed(1)}%` : "—"}
+                        </td>
+                        <td className="font-data">
+                          {covered === 0 ? (
+                            <span className="text-[var(--text-3)]">—</span>
+                          ) : covered < needed ? (
+                            <span className="text-[var(--clr-orange)]">⚠ {needed - covered} unprot.</span>
+                          ) : (
+                            <span className="text-[var(--clr-green)]">{covered}/{needed}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               </div>
