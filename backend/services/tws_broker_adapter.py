@@ -71,10 +71,6 @@ class TwsAdvancedRejectError(Exception):
         self.reject = reject
 
 
-# TWS error codes that carry overridable advanced reject payloads.
-_ADVANCED_REJECT_CODES: frozenset[int] = frozenset({399, 201})
-
-
 def _advanced_reject_from_raw(order_id: int | None, raw: str) -> TwsAdvancedReject:
     try:
         parsed = json.loads(raw)
@@ -937,24 +933,22 @@ class TwsBrokerAdapter:
         if advanced_override:
             order.advancedErrorOverride = ",".join(advanced_override)
 
-        captured_rejects: list[TwsAdvancedReject] = []
-
-        def _on_error(req_id: int, code: int, msg: str, contract: object) -> None:
-            if code in _ADVANCED_REJECT_CODES and msg:
-                captured_rejects.append(_advanced_reject_from_raw(None, msg))
-
-        # Statuses that mean TWS accepted the order — any captured 399 was informational.
-        _ACCEPTED: frozenset[str] = frozenset({"PreSubmitted", "Submitted", "Filled", "PartiallyFilled"})
-
-        self._ib.errorEvent += _on_error
-        try:
-            trade = self._ib.placeOrder(contract, order)
-            # Wait briefly for TWS to fire any immediate advanced reject errors.
-            await asyncio.sleep(0.3)
-            if captured_rejects and trade.orderStatus.status not in _ACCEPTED:
-                raise TwsAdvancedRejectError(captured_rejects[0])
-        finally:
-            self._ib.errorEvent -= _on_error
+        trade = self._ib.placeOrder(contract, order)
+        # Wait briefly for TWS to attach an advanced-reject payload if this
+        # needs an explicit override. trade.advancedError is ib_async's own
+        # signal for that — populated only when TWS actually sends a
+        # structured advancedOrderRejectJson, which is categorically
+        # different from an ordinary informational warning like error 399's
+        # "outside RTH" notice. Checking orderStatus.status here instead
+        # (the old approach) was wrong: ib_async classifies 399 as a warning
+        # and deliberately sets status to the transient "ValidationError"
+        # bookkeeping value while explicitly keeping the order live — that
+        # transient value doesn't mean the order was rejected, so treating
+        # "not yet back to PreSubmitted" as a reject raced against TWS's own
+        # follow-up status correction and produced false positives.
+        await asyncio.sleep(0.3)
+        if trade.advancedError:
+            raise TwsAdvancedRejectError(_advanced_reject_from_raw(None, trade.advancedError))
 
         # trade.orderStatus.status is typically "" immediately after placeOrder —
         # the real status arrives asynchronously via TWS callbacks.
@@ -1009,61 +1003,52 @@ class TwsBrokerAdapter:
         order_ids = [self._ib.client.getReqId() for _ in preview.legs]
         order_id_by_role = {leg.role: order_ids[i] for i, leg in enumerate(preview.legs)}
 
-        captured_rejects: list[TwsAdvancedReject] = []
-
-        def _on_error(req_id: int, code: int, msg: str, contract: object) -> None:
-            if code in _ADVANCED_REJECT_CODES and msg:
-                captured_rejects.append(_advanced_reject_from_raw(req_id, msg))
-
-        _ACCEPTED: frozenset[str] = frozenset({"PreSubmitted", "Submitted", "Filled", "PartiallyFilled"})
-
         trades = []
-        self._ib.errorEvent += _on_error
-        try:
-            for i, leg in enumerate(preview.legs):
-                order = Order(
-                    orderId=order_ids[i],
-                    action=leg.side,
-                    orderType=leg.order_type,
-                    totalQuantity=leg.quantity,
-                    tif=leg.tif,
-                    transmit=leg.transmit,
-                    orderRef=f"ORBIT:TWS:{preview.package_id}:{leg.role}",
-                )
-                if leg.limit_price is not None:
-                    order.lmtPrice = leg.limit_price
-                if leg.stop_price is not None:
-                    order.auxPrice = leg.stop_price
-                if leg.trail is not None:
-                    if leg.trail.mode == "percent":
-                        order.trailingPercent = leg.trail.value
-                    else:
-                        order.auxPrice = leg.trail.value
-                if leg.limit_offset is not None:
-                    order.lmtPriceOffset = leg.limit_offset
-                if leg.good_till_date is not None:
-                    order.goodTillDate = leg.good_till_date
-                if leg.parent_ref is not None:
-                    order.parentId = order_id_by_role[leg.parent_ref]
-                if leg.oca_group is not None:
-                    order.ocaGroup = leg.oca_group
-                    order.ocaType = 1
-                if leg.condition_price is not None and leg.condition_is_above is not None:
-                    order.conditions = [PriceCondition(
-                        price=leg.condition_price, conId=preview.conid, exch="SMART", isMore=leg.condition_is_above,
-                    )]
-                if advanced_override:
-                    order.advancedErrorOverride = ",".join(advanced_override)
+        for i, leg in enumerate(preview.legs):
+            order = Order(
+                orderId=order_ids[i],
+                action=leg.side,
+                orderType=leg.order_type,
+                totalQuantity=leg.quantity,
+                tif=leg.tif,
+                transmit=leg.transmit,
+                orderRef=f"ORBIT:TWS:{preview.package_id}:{leg.role}",
+            )
+            if leg.limit_price is not None:
+                order.lmtPrice = leg.limit_price
+            if leg.stop_price is not None:
+                order.auxPrice = leg.stop_price
+            if leg.trail is not None:
+                if leg.trail.mode == "percent":
+                    order.trailingPercent = leg.trail.value
+                else:
+                    order.auxPrice = leg.trail.value
+            if leg.limit_offset is not None:
+                order.lmtPriceOffset = leg.limit_offset
+            if leg.good_till_date is not None:
+                order.goodTillDate = leg.good_till_date
+            if leg.parent_ref is not None:
+                order.parentId = order_id_by_role[leg.parent_ref]
+            if leg.oca_group is not None:
+                order.ocaGroup = leg.oca_group
+                order.ocaType = 1
+            if leg.condition_price is not None and leg.condition_is_above is not None:
+                order.conditions = [PriceCondition(
+                    price=leg.condition_price, conId=preview.conid, exch="SMART", isMore=leg.condition_is_above,
+                )]
+            if advanced_override:
+                order.advancedErrorOverride = ",".join(advanced_override)
 
-                trade = self._ib.placeOrder(contract, order)
-                trades.append((leg, trade))
+            trade = self._ib.placeOrder(contract, order)
+            trades.append((leg, trade))
 
-            # Wait briefly for TWS to fire any immediate advanced reject errors.
-            await asyncio.sleep(0.3)
-            if captured_rejects and any(t.orderStatus.status not in _ACCEPTED for _, t in trades):
-                raise TwsAdvancedRejectError(captured_rejects[0])
-        finally:
-            self._ib.errorEvent -= _on_error
+        # Wait briefly for TWS to attach an advanced-reject payload on any
+        # leg. See place_order()'s comment for why trade.advancedError (not
+        # orderStatus.status) is the correct signal here.
+        await asyncio.sleep(0.3)
+        for leg, trade in trades:
+            if trade.advancedError:
+                raise TwsAdvancedRejectError(_advanced_reject_from_raw(trade.order.orderId, trade.advancedError))
 
         legs_out = [
             TwsOrderPackageLegSubmission(
@@ -1173,22 +1158,16 @@ class TwsBrokerAdapter:
         if advanced_override:
             trade.order.advancedErrorOverride = ",".join(advanced_override)
 
-        captured_rejects: list[TwsAdvancedReject] = []
-
-        def _on_error(req_id: int, code: int, msg: str, contract: object) -> None:
-            if code in _ADVANCED_REJECT_CODES and msg:
-                captured_rejects.append(_advanced_reject_from_raw(order_id, msg))
-
-        _ACCEPTED: frozenset[str] = frozenset({"PreSubmitted", "Submitted", "Filled", "PartiallyFilled"})
-
-        self._ib.errorEvent += _on_error
-        try:
-            result = self._ib.placeOrder(trade.contract, trade.order)
-            await asyncio.sleep(0.3)
-            if captured_rejects and result.orderStatus.status not in _ACCEPTED:
-                raise TwsAdvancedRejectError(captured_rejects[0])
-        finally:
-            self._ib.errorEvent -= _on_error
+        # trade is reused across this order's whole lifetime (unlike place_order's
+        # always-fresh Trade), so a stale advancedError from an earlier call could
+        # otherwise cause a false positive here — clear it before this attempt.
+        trade.advancedError = ""
+        result = self._ib.placeOrder(trade.contract, trade.order)
+        # See place_order()'s comment for why trade.advancedError (not
+        # orderStatus.status) is the correct reject signal.
+        await asyncio.sleep(0.3)
+        if trade.advancedError:
+            raise TwsAdvancedRejectError(_advanced_reject_from_raw(order_id, trade.advancedError))
 
         status_text = result.orderStatus.status or "modify_requested"
         return TwsOrderActionResult(

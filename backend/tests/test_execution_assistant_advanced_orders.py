@@ -127,7 +127,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from models.tws_execution_assistant import TwsModifyOrderRequest, TwsOrderPackageRequest
-from services.tws_broker_adapter import TwsBrokerAdapter, TwsPlaceOrderGuardError
+from services.tws_broker_adapter import TwsAdvancedRejectError, TwsBrokerAdapter, TwsPlaceOrderGuardError
 from services.tws_order_packages import preview_order_package
 
 
@@ -169,6 +169,7 @@ def test_place_order_package_isolates_each_lot_under_its_own_parent():
         def __init__(self, order):
             self.order = order
             self.orderStatus = SimpleNamespace(status="PreSubmitted")
+            self.advancedError = ""
 
     class _FakeEvent:
         def __iadd__(self, fn):
@@ -369,6 +370,7 @@ def test_place_order_package_attaches_one_price_condition_to_the_broker_order():
         def __init__(self, order):
             self.order = order
             self.orderStatus = SimpleNamespace(status="PreSubmitted")
+            self.advancedError = ""
 
     class _FakeEvent:
         def __iadd__(self, fn):
@@ -461,3 +463,81 @@ def test_modify_order_mutates_tracked_trade_so_reconciliation_reflects_new_price
     # carry the new price — not rely on a TWS echo that may never arrive.
     assert trade.order.auxPrice == 303.0
     fake_ib.placeOrder.assert_called_once_with(contract, trade.order)
+
+
+# ── Reject detection: trade.advancedError, not the transient status ───────────
+
+def test_modify_order_ignores_399_style_warning_with_no_advanced_error():
+    """Regression: TWS error 399 fires for ordinary informational cases too
+    (e.g. a DAY order placed outside RTH). ib_async classifies 399 as a
+    warning and sets orderStatus.status to the transient "ValidationError"
+    bookkeeping value while explicitly documenting the order stays live
+    (trade.advancedError only gets populated if TWS actually attaches an
+    override-needed advancedOrderRejectJson payload). Checking status
+    instead of trade.advancedError raced against TWS's own follow-up status
+    correction and reported fully-accepted live orders as rejected."""
+    adapter = TwsBrokerAdapter()
+    adapter._state = "connected"
+    adapter._connected_port = 4002  # paper port
+
+    order = SimpleNamespace(orderId=419, orderType="LMT", ocaGroup="", lmtPrice=118.0, totalQuantity=12.0)
+    contract = SimpleNamespace()
+    # Snapshot taken mid-race: the 399 warning already flipped status to the
+    # transient value, but no advancedError was ever attached — this is what
+    # a purely informational 399 looks like, indistinguishable from a real
+    # reject if you only look at orderStatus.status.
+    trade = SimpleNamespace(order=order, contract=contract, orderStatus=SimpleNamespace(status="ValidationError"))
+
+    fake_ib = MagicMock()
+    fake_ib.isConnected.return_value = True
+    fake_ib.openTrades.return_value = [trade]
+    fake_ib.placeOrder.return_value = trade
+    adapter._ib = fake_ib
+
+    req = TwsModifyOrderRequest(quantity=12, limit_price=119.0, stop_price=None)
+    result = asyncio.run(adapter.modify_order(419, req, mode="paper"))
+
+    assert result.status == "ValidationError"  # surfaced transparently, not raised as a reject
+    assert trade.order.lmtPrice == 119.0  # the modify still went through
+
+
+def test_modify_order_raises_advanced_reject_with_parsed_override_codes():
+    """When TWS genuinely attaches an advancedOrderRejectJson payload,
+    trade.advancedError carries real JSON (unlike the plain-text 399 message
+    the old code tried to parse as JSON and always failed on, silently
+    losing override_codes) — confirm it parses correctly end to end."""
+    adapter = TwsBrokerAdapter()
+    adapter._state = "connected"
+    adapter._connected_port = 4002  # paper port
+
+    order = SimpleNamespace(orderId=500, orderType="LMT", ocaGroup="", lmtPrice=118.0, totalQuantity=12.0)
+    contract = SimpleNamespace()
+    trade = SimpleNamespace(
+        order=order, contract=contract, orderStatus=SimpleNamespace(status="ValidationError"),
+        advancedError="",
+    )
+
+    def _place_order_and_attach_reject(_contract, _order):
+        # Mirrors reality: modify_order() clears trade.advancedError right
+        # before calling placeOrder(), and it's TWS's async response —
+        # processed during the subsequent sleep, not placeOrder()'s return —
+        # that populates it. Setting it here simulates that arrival.
+        trade.advancedError = '{"errorCode": "8229", "message": "Order size exceeds your maximum limit."}'
+        return trade
+
+    fake_ib = MagicMock()
+    fake_ib.isConnected.return_value = True
+    fake_ib.openTrades.return_value = [trade]
+    fake_ib.placeOrder.side_effect = _place_order_and_attach_reject
+    adapter._ib = fake_ib
+
+    req = TwsModifyOrderRequest(quantity=1000, limit_price=118.0, stop_price=None)
+    raised = None
+    try:
+        asyncio.run(adapter.modify_order(500, req, mode="paper"))
+    except TwsAdvancedRejectError as exc:
+        raised = exc
+
+    assert raised is not None
+    assert raised.reject.reason == "Order size exceeds your maximum limit."
+    assert raised.reject.override_codes == ["8229"]
