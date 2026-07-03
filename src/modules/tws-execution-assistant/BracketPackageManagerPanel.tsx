@@ -30,7 +30,7 @@ export function BracketPackageManagerPanel({
         </div>
         <button
           type="button"
-          className="h-8 rounded border border-border px-3 text-xs text-[var(--text-2)] hover:bg-[var(--bg-1)]"
+          className="h-8 rounded border border-border bg-[var(--bg-0)] px-3 text-xs font-medium text-[var(--text-2)] transition-colors hover:bg-[var(--bg-1)] hover:text-[var(--text-1)] active:scale-95"
           onClick={onClose}
         >
           Close
