@@ -312,17 +312,24 @@ function packageLegPrice(order: OrderSnapshot): string {
 }
 
 /** How much of a position has an open exit order (opposite-side order for the
- * same conid) covering it. Purely a Positions-table display heuristic — it
- * doesn't know about OCA groups or partial fills, just sums exit quantity. */
+ * same conid) covering it. OCA-linked exits (a lot's target + stop) protect
+ * the same shares — only one can fill — so each OCA group counts once, at its
+ * largest leg. Purely a Positions-table display heuristic; partial fills on a
+ * leg aren't visible here. */
 function positionProtection(position: PositionSnapshot, openOrders: OrderSnapshot[]): {
   covered: number;
   needed: number;
 } {
   const exitSide = position.position > 0 ? "SELL" : "BUY";
   const needed = Math.abs(position.position);
-  const covered = openOrders
-    .filter((o) => o.conid === position.conid && o.side === exitSide)
-    .reduce((sum, o) => sum + o.quantity, 0);
+  const exits = openOrders.filter((o) => o.conid === position.conid && o.side === exitSide);
+  const ocaMax = new Map<string, number>();
+  let covered = 0;
+  for (const o of exits) {
+    if (o.oca_group) ocaMax.set(o.oca_group, Math.max(ocaMax.get(o.oca_group) ?? 0, o.quantity));
+    else covered += o.quantity;
+  }
+  for (const qty of ocaMax.values()) covered += qty;
   return { covered, needed };
 }
 
