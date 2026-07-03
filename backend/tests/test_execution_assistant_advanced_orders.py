@@ -126,8 +126,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from models.tws_execution_assistant import TwsOrderPackageRequest
-from services.tws_broker_adapter import TwsBrokerAdapter
+from models.tws_execution_assistant import TwsModifyOrderRequest, TwsOrderPackageRequest
+from services.tws_broker_adapter import TwsBrokerAdapter, TwsPlaceOrderGuardError
 from services.tws_order_packages import preview_order_package
 
 
@@ -394,3 +394,35 @@ def test_place_order_package_attaches_one_price_condition_to_the_broker_order():
     assert condition.exch == "SMART"
     assert condition.isMore is False
     assert condition.price == 115
+
+
+# ── Modify guard: OCA-linked legs can't be revised in place ───────────────────
+
+def test_modify_order_refuses_oca_grouped_order_before_calling_placeorder():
+    """Regression: IBKR rejects revising an order with an explicit ocaGroup
+    (error 10326 "OCA group revision is not allowed"), and the rejected
+    resubmission cancels the order instead of leaving it untouched — observed
+    live against a scale-out stop leg. The guard must fire before placeOrder()
+    is ever called, for every caller, not just the UI path that hit it."""
+    adapter = TwsBrokerAdapter()
+    adapter._state = "connected"
+    adapter._connected_port = 4002  # paper port
+
+    order = SimpleNamespace(orderId=417, orderType="STP", ocaGroup="ORBIT-pkg-LOT0", parentId=415)
+    trade = SimpleNamespace(order=order, contract=SimpleNamespace())
+
+    fake_ib = MagicMock()
+    fake_ib.isConnected.return_value = True
+    fake_ib.openTrades.return_value = [trade]
+    adapter._ib = fake_ib
+
+    req = TwsModifyOrderRequest(quantity=12, limit_price=None, stop_price=116.0)
+    raised = None
+    try:
+        asyncio.run(adapter.modify_order(417, req, mode="paper"))
+    except TwsPlaceOrderGuardError as exc:
+        raised = exc
+
+    assert raised is not None
+    assert raised.error_code == "oca_group_modify_unsupported"
+    fake_ib.placeOrder.assert_not_called()

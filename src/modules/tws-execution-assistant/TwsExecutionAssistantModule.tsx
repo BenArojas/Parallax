@@ -213,6 +213,7 @@ const SUBMIT_ERROR_MESSAGES: Record<string, string> = {
   not_paper_port: "Not a paper port — only ports 4002 (IB Gateway) or 7497 (TWS) are allowed.",
   plan_not_valid: "Plan is no longer valid — re-validate before retrying.",
   invalid_plan: "Plan is no longer valid — re-validate before retrying.",
+  oca_group_modify_unsupported: "IBKR doesn't allow revising an OCA-linked order in place — cancel the lot and re-place it with the new price instead.",
 };
 
 

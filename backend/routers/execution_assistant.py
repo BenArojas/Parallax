@@ -45,6 +45,7 @@ _GUARD_STATUS: dict[str, int] = {
     "invalid_quantity": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_limit_price": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_stop_price": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "oca_group_modify_unsupported": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "paper_port_cannot_arm_live": status.HTTP_403_FORBIDDEN,
     "paper_port_cannot_live_trade": status.HTTP_403_FORBIDDEN,
     "live_session_mismatch": status.HTTP_409_CONFLICT,

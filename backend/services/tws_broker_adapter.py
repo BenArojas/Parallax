@@ -1138,6 +1138,15 @@ class TwsBrokerAdapter:
             raise TwsPlaceOrderGuardError("order_not_found")
         if not can_modify_order_type(trade.order.orderType):
             raise TwsPlaceOrderGuardError("unsupported_order_type")
+        if trade.order.ocaGroup:
+            # IBKR rejects revising an order that carries an explicit ocaGroup
+            # (error 10326 "OCA group revision is not allowed") — and the
+            # rejected resubmission cancels the order rather than leaving it
+            # untouched. Bracket legs are unaffected (TWS auto-links those via
+            # shared parentId, no explicit ocaGroup on the order), but scale-out
+            # target/stop/moc_fallback legs all set one. Guard here so this is
+            # refused before ever calling placeOrder(), for every caller.
+            raise TwsPlaceOrderGuardError("oca_group_modify_unsupported")
         if req.quantity <= 0:
             raise TwsPlaceOrderGuardError("invalid_quantity")
         if trade.order.orderType in ("LMT", "STP LMT"):

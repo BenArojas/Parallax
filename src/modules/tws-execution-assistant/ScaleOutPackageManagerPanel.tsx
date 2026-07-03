@@ -128,7 +128,7 @@ export function ScaleOutPackageManagerPanel({
                       <td className="pr-2 text-[var(--text-3)]">{o.parent_id ?? "—"}</td>
                       <td className="pr-2 text-[var(--text-3)]">{o.oca_group ?? "—"}</td>
                       <td className="whitespace-nowrap py-1">
-                        {canModifyOrderType(o.order_type) ? (
+                        {canModifyOrderType(o.order_type) && !o.oca_group ? (
                           <button
                             type="button"
                             className="h-5 rounded border border-[var(--clr-cyan)]/50 px-1.5 text-[10px] text-[var(--clr-cyan)] hover:bg-[var(--clr-cyan)]/10 active:scale-95"
@@ -137,7 +137,16 @@ export function ScaleOutPackageManagerPanel({
                             Modify
                           </button>
                         ) : (
-                          <span className="text-[10px] text-[var(--text-3)]" title="Modify not supported for this order type.">—</span>
+                          <span
+                            className="text-[10px] text-[var(--text-3)]"
+                            title={
+                              o.oca_group
+                                ? "IBKR doesn't allow revising an OCA-linked order in place — cancel the lot instead."
+                                : "Modify not supported for this order type."
+                            }
+                          >
+                            —
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -151,8 +160,9 @@ export function ScaleOutPackageManagerPanel({
 
       <div className="shrink-0 rounded border border-border/60 bg-[var(--bg-0)] p-2 text-[11px] leading-5 text-[var(--text-3)]">
         Cancel acts on the whole lot — canceling just the stop or just the target isn't offered, so a
-        lot never ends up half-protected. Modify changes one leg's price only — quantity stays locked
-        there, since a lot's entry, target, and stop must always share the same share count.
+        lot never ends up half-protected. Modify is only offered on a lot's entry price — IBKR refuses
+        to revise the OCA-linked target/stop in place, so those aren't editable here; cancel the lot
+        and re-place it for a different target or stop.
       </div>
     </div>
   );
