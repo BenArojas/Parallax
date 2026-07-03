@@ -1085,6 +1085,7 @@ export function TwsExecutionAssistantModule() {
                 <ScaleOutPackageManagerPanel
                   pkg={managedScaleOutPackage}
                   onCancelLot={(ids) => ids.forEach((id) => cancelOrderMutation.mutate(id))}
+                  onModify={focusOrderForModify}
                   onClose={() => setManagedScaleOutPackageId(null)}
                 />
               ) : managedBracketPackage != null ? (
@@ -1163,6 +1164,11 @@ export function TwsExecutionAssistantModule() {
                   ? priceFieldsFor(editingOrder.order_type as TwsOrderType)
                   : [];
                 const reason = modifyDisabledReason();
+                // A scale-out leg's entry/target/stop must always share the same share
+                // count — quantity edits need coordinating across the whole lot, which
+                // isn't built yet. Price-only edits (this form's other fields) don't
+                // have that constraint, so they stay open.
+                const modifyQuantityLocked = parseScaleOutOrderRef(editingOrder.order_ref) != null;
                 return (
                   <div className="flex h-full flex-col">
                     <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pb-2">
@@ -1173,11 +1179,20 @@ export function TwsExecutionAssistantModule() {
                       {!modifyReview ? (
                         <>
                           <label className="space-y-1.5">
-                            <span className="text-xs font-medium text-[var(--text-2)]">Quantity</span>
+                            <span className="text-xs font-medium text-[var(--text-2)]">
+                              Quantity
+                              {modifyQuantityLocked && (
+                                <span className="ml-1.5 text-[10px] font-normal normal-case text-[var(--text-3)]">
+                                  locked — must match the rest of this lot
+                                </span>
+                              )}
+                            </span>
                             <input
                               type="number"
-                              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none transition-colors focus:border-[var(--clr-cyan)]"
+                              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed disabled:opacity-50"
                               value={modifyForm.quantity}
+                              disabled={modifyQuantityLocked}
+                              title={modifyQuantityLocked ? "Quantity is locked for scale-out legs — entry, target, and stop must stay matched." : undefined}
                               onChange={(e) => setModifyForm((f) => ({ ...f, quantity: Number(e.target.value) }))}
                             />
                           </label>

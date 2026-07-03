@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { OrderSnapshot } from "./api";
+import { canModifyOrderType } from "./orderCapabilities";
 import { parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 
 function priceDisplay(order: OrderSnapshot): string {
@@ -14,11 +15,9 @@ function priceDisplay(order: OrderSnapshot): string {
  * button. Deliberately no per-leg cancel: canceling just a lot's stop (or
  * just its target) leaves the other exit live with nothing protecting it,
  * an asymmetric exposure the user never chose. Cancel carries none of the
- * coordinated-replace risk that blocks modify — each leg's cancel is the
- * same order-agnostic cancelOrder() every other flow already uses, just
- * fired for the whole lot's order ids together. No per-leg Modify either:
- * replacing a lot's matched exit orders together needs its own safety
- * review and isn't built yet. */
+ * coordinated-replace risk that blocks quantity edits — each leg's cancel
+ * is the same order-agnostic cancelOrder() every other flow already uses,
+ * just fired for the whole lot's order ids together. */
 function CancelLotButton({ orderIds, onCancelLot }: { orderIds: number[]; onCancelLot: (order_ids: number[]) => void }) {
   const [confirming, setConfirming] = useState(false);
   if (confirming) {
@@ -56,10 +55,12 @@ function CancelLotButton({ orderIds, onCancelLot }: { orderIds: number[]; onCanc
 export function ScaleOutPackageManagerPanel({
   pkg,
   onCancelLot,
+  onModify,
   onClose,
 }: {
   pkg: ScaleOutOrderPackage;
   onCancelLot: (order_ids: number[]) => void;
+  onModify: (order: OrderSnapshot) => void;
   onClose: () => void;
 }) {
   return (
@@ -107,7 +108,8 @@ export function ScaleOutPackageManagerPanel({
                     <th className="pb-1 pr-2 font-medium">Price</th>
                     <th className="pb-1 pr-2 font-medium">Status</th>
                     <th className="pb-1 pr-2 font-medium">Parent</th>
-                    <th className="pb-1 font-medium">OCA</th>
+                    <th className="pb-1 pr-2 font-medium">OCA</th>
+                    <th className="pb-1 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -124,7 +126,20 @@ export function ScaleOutPackageManagerPanel({
                       <td className="pr-2 font-data text-[var(--text-2)]">{priceDisplay(o)}</td>
                       <td className="pr-2 text-[var(--text-2)]">{o.status}</td>
                       <td className="pr-2 text-[var(--text-3)]">{o.parent_id ?? "—"}</td>
-                      <td className="text-[var(--text-3)]">{o.oca_group ?? "—"}</td>
+                      <td className="pr-2 text-[var(--text-3)]">{o.oca_group ?? "—"}</td>
+                      <td className="whitespace-nowrap py-1">
+                        {canModifyOrderType(o.order_type) ? (
+                          <button
+                            type="button"
+                            className="h-5 rounded border border-[var(--clr-cyan)]/50 px-1.5 text-[10px] text-[var(--clr-cyan)] hover:bg-[var(--clr-cyan)]/10 active:scale-95"
+                            onClick={() => onModify(o)}
+                          >
+                            Modify
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-[var(--text-3)]" title="Modify not supported for this order type.">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -136,9 +151,8 @@ export function ScaleOutPackageManagerPanel({
 
       <div className="shrink-0 rounded border border-border/60 bg-[var(--bg-0)] p-2 text-[11px] leading-5 text-[var(--text-3)]">
         Cancel acts on the whole lot — canceling just the stop or just the target isn't offered, so a
-        lot never ends up half-protected. Editing a lot's quantity, target, or stop still isn't
-        available here — that means canceling and replacing its matched exit orders together, which
-        needs its own safety review.
+        lot never ends up half-protected. Modify changes one leg's price only — quantity stays locked
+        there, since a lot's entry, target, and stop must always share the same share count.
       </div>
     </div>
   );
