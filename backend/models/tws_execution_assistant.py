@@ -53,6 +53,7 @@ class TwsStatusResponse(BaseModel):
     kill_switch_active: bool
     reconciliation_summary: ReconciliationSummary
     api_server_available: bool = False  # TCP-reachable; True even before Orbit's adapter connects
+    day_pnl: float | None = None
 
 
 class PositionSnapshot(BaseModel):

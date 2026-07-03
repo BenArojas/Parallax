@@ -11,7 +11,7 @@ from datetime import date as date_, datetime, timezone
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
-from ib_async import IB, Contract, Order, PnLSingle, PriceCondition
+from ib_async import IB, Contract, Order, PnL, PnLSingle, PriceCondition
 from starlette.websockets import WebSocketState
 
 from models.broker_session import BrokerSessionMode
@@ -184,6 +184,7 @@ class TwsBrokerAdapter:
         self._depth_streams: dict[int, dict[str, object]] = {}
         self._recon_changed_task: asyncio.Task | None = None
         self._pnl_singles: dict[int, PnLSingle] = {}
+        self._account_pnl: PnL | None = None
 
         async def _on_connected(*_args: object) -> None:
             await self._broadcast_stream_status(True)
@@ -192,6 +193,7 @@ class TwsBrokerAdapter:
             await self._broadcast_stream_status(False)
             self._clear_stream_registry()
             self._pnl_singles.clear()
+            self._account_pnl = None
 
         def _on_recon_changed(*_args: object) -> None:
             if self._recon_changed_task is not None and not self._recon_changed_task.done():
@@ -725,6 +727,10 @@ class TwsBrokerAdapter:
                 open_order_count=len(trades),
                 unmanaged_order_count=sum(1 for t in trades if t.order.clientId != self._client_id),
             )
+            if self._account_pnl is None:
+                accounts = self._ib.managedAccounts()
+                if accounts:
+                    self._account_pnl = self._ib.reqPnL(accounts[0], "")
         else:
             summary = ReconciliationSummary()
         return TwsStatusResponse(
@@ -734,6 +740,7 @@ class TwsBrokerAdapter:
             kill_switch_active=self._kill_switch_active,
             reconciliation_summary=summary,
             api_server_available=api_server_available,
+            day_pnl=_nan_to_none(self._account_pnl.dailyPnL) if self._account_pnl else None,
         )
 
     async def get_sec_type(self, conid: int) -> str | None:

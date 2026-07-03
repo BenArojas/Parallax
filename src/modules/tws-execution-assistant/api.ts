@@ -39,6 +39,7 @@ export interface TwsStatusResponse {
   reconciliation_summary: ReconciliationSummary;
   /** TCP-reachable even before Orbit's adapter connects. */
   api_server_available: boolean;
+  day_pnl: number | null;
 }
 
 export interface PositionSnapshot {

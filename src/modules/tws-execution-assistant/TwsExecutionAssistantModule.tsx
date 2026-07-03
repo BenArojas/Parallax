@@ -1062,6 +1062,15 @@ export function TwsExecutionAssistantModule() {
               <span className="text-[var(--text-2)]">{(summary?.position_count ?? 0) === 1 ? "position" : "positions"}</span>
             </div>
             <div className="flex items-center gap-1.5 px-4 py-2.5">
+              {status?.day_pnl == null ? (
+                <span className="text-[var(--text-3)]">Day P&L —</span>
+              ) : (
+                <span className={`font-data font-medium ${status.day_pnl >= 0 ? "text-[var(--clr-green)]" : "text-[var(--clr-red)]"}`}>
+                  Day P&L {status.day_pnl >= 0 ? "+" : "-"}${Math.abs(status.day_pnl).toFixed(2)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 px-4 py-2.5">
               <span className="font-data font-medium text-[var(--text-1)]">{summary?.open_order_count ?? 0}</span>
               <span className="text-[var(--text-2)]">{(summary?.open_order_count ?? 0) === 1 ? "open order" : "open orders"}</span>
             </div>
