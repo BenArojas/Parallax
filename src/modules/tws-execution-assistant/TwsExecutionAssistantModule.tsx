@@ -12,6 +12,7 @@ import { OrderRow } from "./OrderRow";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
 import { BracketBuilderPanel } from "./BracketBuilderPanel";
 import { AdvancedOrderPanel } from "./AdvancedOrderPanel";
+import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
 import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
 import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
@@ -36,6 +37,31 @@ const PLAN_DEFAULTS: ExecutionPlanDraftRequest = {
   limit_price: null,
   stop_price: null,
 };
+
+function moneyValue(value: number | null | undefined): string {
+  return value != null && value > 0 ? `$${value.toFixed(2)}` : "missing";
+}
+
+function quantityValue(value: number): string {
+  return value > 0 ? String(value) : "missing";
+}
+
+function standardOrderText(plan: ExecutionPlanDraftRequest, fields: ReturnType<typeof priceFieldsFor>): string {
+  if (plan.order_type === "MKT") return "MKT";
+  if (plan.order_type === "LMT") return `LMT ${moneyValue(plan.limit_price)}`;
+  if (plan.order_type === "STP") return `STP ${moneyValue(plan.stop_price)}`;
+  if (fields.includes("stop_price") && fields.includes("limit_price")) {
+    return `STP LMT stop ${moneyValue(plan.stop_price)} · limit ${moneyValue(plan.limit_price)}`;
+  }
+  return plan.order_type;
+}
+
+function standardPriceRequirement(fields: ReturnType<typeof priceFieldsFor>): string {
+  if (fields.includes("stop_price") && fields.includes("limit_price")) return "Stop + limit required";
+  if (fields.includes("stop_price")) return "Stop trigger required";
+  if (fields.includes("limit_price")) return "Limit price required";
+  return "No price required";
+}
 
 
 /** IBKR returns -1 for fields that have no data (unset sentinel). */
@@ -928,6 +954,59 @@ export function TwsExecutionAssistantModule() {
     adapterState === "connecting" ||
     connectMutation.isPending ||
     disconnectMutation.isPending;
+  const standardDraftReason = saveDraftDisabledReason();
+  const standardPriceFields = priceFieldsFor(planForm.order_type);
+  const standardDisplaySymbol = planForm.symbol || "symbol";
+  const standardOrderTitle =
+    `${planForm.side} ${quantityValue(planForm.quantity)} ${standardDisplaySymbol} · ${standardOrderText(planForm, standardPriceFields)}`;
+  const standardPriceRequirementText = standardPriceRequirement(standardPriceFields);
+  const standardHasPriceLine =
+    (standardPriceFields.includes("limit_price") && planForm.limit_price != null && planForm.limit_price > 0) ||
+    (standardPriceFields.includes("stop_price") && planForm.stop_price != null && planForm.stop_price > 0);
+  const standardAnatomySteps: PlanAnatomyStep[] = [
+    {
+      tone: "blue",
+      label: "WHEN",
+      title: "Immediately after submit",
+      detail: "No condition gate. This order is ready once it is reviewed and submitted.",
+      metaLabel: "State",
+      metaValue: standardDraftReason == null ? "Ready" : "Draft",
+    },
+    {
+      tone: "cyan",
+      label: "ORDER",
+      title: standardOrderTitle,
+      detail: "Standard mode sends one independent broker order with no linked target or protective child leg.",
+      metaLabel: "Role",
+      metaValue: "Single",
+    },
+  ];
+  const standardAnatomyEffects: PlanAnatomyEffect[] = [
+    {
+      label: "Broker effect",
+      value: "1 order",
+      detail: "No OCA group, child exit, or package linkage is created.",
+      tone: "cyan",
+    },
+    {
+      label: "Price requirement",
+      value: standardPriceRequirementText,
+      detail: standardPriceFields.length > 0
+        ? standardHasPriceLine
+          ? "The chart owns the visible draft price line."
+          : "Fill the required price field; the chart line appears there."
+        : "Market orders review without a fixed draft price line.",
+      tone: standardDraftReason == null || standardHasPriceLine || standardPriceFields.length === 0 ? "blue" : "orange",
+    },
+    {
+      label: "Review gate",
+      value: standardDraftReason ?? "Ready to review",
+      detail: standardDraftReason == null
+        ? "Review uses the existing preview flow before any placement."
+        : "The Review button stays disabled until this is fixed.",
+      tone: standardDraftReason == null ? "green" : "orange",
+    },
+  ];
   const summary = recon ?? status?.reconciliation_summary;
 
   return (
@@ -1769,6 +1848,14 @@ export function TwsExecutionAssistantModule() {
                         </label>
                       )}
                     </div>
+
+                    <PlanAnatomyPanel
+                      title="Standard order logic"
+                      subtitle="The chart shows any price lines. This explains the single broker order and review gate."
+                      badge={standardDraftReason == null ? "Ready to review" : "Draft incomplete"}
+                      steps={standardAnatomySteps}
+                      effects={standardAnatomyEffects}
+                    />
 
                     {/* Notional value */}
                     {planForm.limit_price != null && planForm.limit_price > 0 && planForm.quantity > 0 && (

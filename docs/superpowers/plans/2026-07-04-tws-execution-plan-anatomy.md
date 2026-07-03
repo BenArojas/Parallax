@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a compact Plan Anatomy surface to bracket mode so Execution Plan explains order logic while the existing TWS chart keeps price-level visualization.
+**Goal:** Add a compact Plan Anatomy surface so Execution Plan explains order logic while the existing TWS chart keeps price-level visualization.
 
-**Architecture:** Keep the slice frontend-only. Create one reusable anatomy presentation component, wire it into `BracketBuilderPanel`, and derive copy from the bracket builder's existing local state. Do not change package preview/submit contracts.
+**Architecture:** Keep the slice frontend-only. Create one reusable anatomy presentation component, wire it into `BracketBuilderPanel` and Standard draft mode, and derive copy from existing local state. Do not change package preview/submit contracts.
 
 **Tech Stack:** React 19, TypeScript, Tailwind v4 utility classes, existing Orbit CSS variables, existing `twsApi` package endpoints.
 
@@ -13,7 +13,8 @@
 - The TWS chart remains the only visual price-level surface; do not add a mini price map.
 - No backend, API, broker, persistence, or live-trading policy changes.
 - Use existing Orbit CSS variables: `--clr-*`, `--glow-*`, `--bg-*`, `--text-*`, `--border`.
-- First slice is bracket mode only; stop after it is verified.
+- First slice was bracket mode only and is complete.
+- Second slice is standard mode only; stop after it is verified.
 - Per `docs/testing.md`, no new tests are required because this does not alter a critical trading promise.
 
 ---
@@ -28,7 +29,7 @@
   - Builds bracket anatomy from existing local form state.
   - Places the anatomy panel under the bracket intro copy and above the input grid.
 - Modify `PROJECT_PLAN.md`
-  - Records the UI follow-up before coding begins and marks it in progress.
+  - Records the UI follow-up before coding begins and marks it complete after verification.
 
 ## Task 1: Bracket Plan Anatomy Tracer Slice
 
@@ -216,13 +217,28 @@ git commit -m "feat: add tws bracket plan anatomy"
 
 ## Follow-Up Issues, Not Part Of This Slice
 
-- Extend the same anatomy component to Standard mode after bracket smoke.
 - Adapt anatomy for Scale-Out stages/lots, using existing scenario/protection data.
 - Add `onChartLines` support to `AdvancedOrderPanel` only if advanced-mode price context needs to appear on the real chart.
 - Add Price Condition anatomy with a `WHEN` condition gate.
 
+## Task 2: Standard Plan Anatomy Follow-Up
+
+**Files:**
+- Modify: `src/modules/tws-execution-assistant/TwsExecutionAssistantModule.tsx`
+- Modify: `PROJECT_PLAN.md`
+
+**Interfaces:**
+- Consumes: existing Standard draft state (`planForm`) and existing validation (`saveDraftDisabledReason`).
+- Produces: a read-only anatomy panel rendered inside Standard draft mode before review.
+
+- [x] Add one active roadmap note in `PROJECT_PLAN.md`.
+- [x] Reuse `PlanAnatomyPanel`; do not create a second component.
+- [x] Derive `WHEN`, `ORDER`, broker effect, price requirement, and review gate copy from existing Standard state.
+- [x] Render the panel under the Standard input grid and before derived notional value.
+- [x] Verify with `npm run typecheck`, `git diff --check`, and focused TWS frontend package tests.
+
 ## Self-Review
 
-- Spec coverage: covered Plan Anatomy, chart-line non-duplication, bracket-first tracer, no backend/API changes, and verification.
+- Spec coverage: covered Plan Anatomy, chart-line non-duplication, bracket-first and Standard follow-up tracers, no backend/API changes, and verification.
 - Placeholder scan: no `TBD`, `TODO`, or unspecified implementation steps.
 - Type consistency: `PlanAnatomyStep`, `PlanAnatomyEffect`, and `PlanAnatomyPanelProps` are defined before use.
