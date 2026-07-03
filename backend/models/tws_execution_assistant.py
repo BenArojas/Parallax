@@ -204,6 +204,10 @@ class TwsStreamStatusEvent(BaseModel):
     connected: bool
 
 
+class TwsReconChangedEvent(BaseModel):
+    type: Literal["tws_recon_changed"] = "tws_recon_changed"
+
+
 class TwsQuoteStreamEvent(BaseModel):
     type: Literal["tws_quote"] = "tws_quote"
     conid: int

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, LockKeyhole, Power } from "lucide-react";
 import { BackToOrbitButton } from "@/components/ui/BackToOrbitButton";
@@ -437,7 +437,7 @@ type PlanMode = "standard" | "scale_out" | "bracket" | "advanced";
 
 export function TwsExecutionAssistantModule() {
   const queryClient = useQueryClient();
-  const { streamConnected } = useTwsLiveStream();
+  const { streamConnected, addHandler } = useTwsLiveStream();
   const [planMode, setPlanMode] = useState<PlanMode>("standard");
   const [sweeping, setSweeping] = useState(false);
   const [form, setForm] = useState<TwsConnectRequest>(TWS_CONNECT_DEFAULTS);
@@ -528,9 +528,19 @@ export function TwsExecutionAssistantModule() {
   const { data: recon } = useQuery({
     queryKey: RECON_KEY,
     queryFn: twsApi.getReconciliation,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
     enabled: status?.connected === true,
   });
+
+  // Push-driven refetch: TWS reports order/position changes over the stream
+  // (see backend TwsReconChangedEvent). Polling above is now just a fallback.
+  useEffect(() => {
+    return addHandler((msg) => {
+      if (msg.type !== "tws_recon_changed") return;
+      queryClient.invalidateQueries({ queryKey: RECON_KEY });
+      queryClient.invalidateQueries({ queryKey: STATUS_KEY });
+    });
+  }, [addHandler, queryClient]);
 
   const { packages: scaleOutPackages, standaloneOrders: afterScaleOut } = recon
     ? groupScaleOutOrders(recon)
@@ -1476,7 +1486,7 @@ export function TwsExecutionAssistantModule() {
                       <div>
                         <p className="text-xs font-semibold text-[var(--clr-green)]">Order sent to TWS paper account.</p>
                         <p className="mt-0.5 text-xs text-[var(--text-2)]">
-                          Open Orders refreshes automatically. Use "Refresh Open Orders" to poll for fill status.
+                          Open Orders and Positions update in real time as TWS reports fills.
                         </p>
                       </div>
                     </div>
@@ -1489,12 +1499,6 @@ export function TwsExecutionAssistantModule() {
                       onClick={() => { placeOrderMutation.reset(); setCurrentPlan(null); setPaperPreview(null); setPaperSubmission(null); setPlanForm(PLAN_DEFAULTS); }}
                     >
                       New order
-                    </button>
-                    <button
-                      className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-colors hover:bg-[var(--bg-1)] hover:text-[var(--text-1)]"
-                      onClick={() => queryClient.invalidateQueries({ queryKey: RECON_KEY })}
-                    >
-                      Refresh Open Orders
                     </button>
                   </div>
                 </div>

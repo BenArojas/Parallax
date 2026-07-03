@@ -43,6 +43,7 @@ from models.tws_execution_assistant import (
     TwsOrderPackagePreview,
     TwsOrderPackageSubmission,
     TwsQuoteStreamEvent,
+    TwsReconChangedEvent,
     TwsStreamStatusEvent,
     TwsStreamSubscribeRequest,
     TwsStatusResponse,
@@ -176,6 +177,7 @@ class TwsBrokerAdapter:
         self._quote_streams: dict[int, dict[str, object]] = {}
         self._bar_streams: dict[tuple[int, str], dict[str, object]] = {}
         self._depth_streams: dict[int, dict[str, object]] = {}
+        self._recon_changed_task: asyncio.Task | None = None
 
         async def _on_connected(*_args: object) -> None:
             await self._broadcast_stream_status(True)
@@ -184,10 +186,23 @@ class TwsBrokerAdapter:
             await self._broadcast_stream_status(False)
             self._clear_stream_registry()
 
+        def _on_recon_changed(*_args: object) -> None:
+            if self._recon_changed_task is not None and not self._recon_changed_task.done():
+                return
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            self._recon_changed_task = loop.create_task(self._debounced_recon_broadcast())
+
         self._stream_connected_handler = _on_connected
         self._stream_disconnected_handler = _on_disconnected
+        self._recon_changed_handler = _on_recon_changed
         self._ib.connectedEvent += self._stream_connected_handler
         self._ib.disconnectedEvent += self._stream_disconnected_handler
+        self._ib.orderStatusEvent += self._recon_changed_handler
+        self._ib.execDetailsEvent += self._recon_changed_handler
+        self._ib.positionEvent += self._recon_changed_handler
 
     async def connect(self, host: str, port: int, client_id: int) -> None:
         # KNOWN GAP: no paper/live account-type check here. Paper is the default
@@ -640,6 +655,26 @@ class TwsBrokerAdapter:
 
     async def _broadcast_stream_status(self, connected: bool) -> None:
         event = TwsStreamStatusEvent(connected=connected).model_dump()
+        dead: list[WebSocket] = []
+        for websocket in list(self._stream_subscriptions):
+            if not self.stream_socket_is_open(websocket):
+                dead.append(websocket)
+                continue
+            try:
+                await websocket.send_json(event)
+            except RuntimeError:
+                dead.append(websocket)
+        for websocket in dead:
+            self.stream_cleanup(websocket)
+
+    async def _debounced_recon_broadcast(self) -> None:
+        # ponytail: trailing-edge debounce — a single fill fires orderStatus +
+        # execDetails + position events, this coalesces the burst into one push.
+        await asyncio.sleep(0.3)
+        await self._broadcast_recon_changed()
+
+    async def _broadcast_recon_changed(self) -> None:
+        event = TwsReconChangedEvent().model_dump()
         dead: list[WebSocket] = []
         for websocket in list(self._stream_subscriptions):
             if not self.stream_socket_is_open(websocket):
