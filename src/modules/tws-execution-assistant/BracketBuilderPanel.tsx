@@ -12,6 +12,7 @@ import {
   type TwsOrderPackageRequest,
   type TwsOrderPackageSubmission,
 } from "./api";
+import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
 import type { PlanChartLine } from "./TwsCandleChart";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
 
@@ -34,6 +35,20 @@ function validationErrors(err: unknown): string[] {
     }
   }
   return [];
+}
+
+function moneyInput(value: string): string {
+  const n = Number(value);
+  return n > 0 ? `$${n.toFixed(2)}` : "missing";
+}
+
+function quantityInput(value: string): string {
+  const n = Number(value);
+  return n > 0 ? String(n) : "missing";
+}
+
+function oppositeSide(side: ExecutionPlanSide): ExecutionPlanSide {
+  return side === "BUY" ? "SELL" : "BUY";
 }
 
 /** Build the request from raw form inputs, or null while required fields are incomplete. */
@@ -209,6 +224,62 @@ export function BracketBuilderPanel({
   });
 
   const req = buildRequest(conid, symbol, side, quantity, orderType, limitPrice, targetPrice, useTrail, stopPrice, trailValue);
+  const entryText = orderType === "LMT" ? `LMT ${moneyInput(limitPrice)}` : "MKT";
+  const quantityText = quantityInput(quantity);
+  const exitSide = oppositeSide(side);
+  const displaySymbol = symbol || "symbol";
+  const trailNumber = Number(trailValue);
+  const stopNumber = Number(stopPrice);
+  const hasProtection = useTrail ? trailNumber > 0 : stopNumber > 0;
+  const protectText = useTrail
+    ? trailNumber > 0 ? `TRAIL $${trailNumber.toFixed(2)}` : "TRAIL missing"
+    : `STP ${moneyInput(stopPrice)}`;
+  const anatomySteps: PlanAnatomyStep[] = [
+    {
+      tone: "blue",
+      label: "WHEN",
+      title: "Immediately after submit",
+      detail: "No condition gate. This bracket is ready once it is previewed and submitted.",
+      metaLabel: "State",
+      metaValue: req ? "Ready" : "Draft",
+    },
+    {
+      tone: "cyan",
+      label: "ENTER",
+      title: `${side} ${quantityText} ${displaySymbol} · ${entryText}`,
+      detail: "This parent entry controls when the target and protection legs become active.",
+      metaLabel: "Role",
+      metaValue: "Parent",
+    },
+    {
+      tone: "green",
+      label: "EXIT",
+      title: `${exitSide} ${quantityText} ${displaySymbol} · LMT ${moneyInput(targetPrice)}`,
+      detail: "If this target fills, the protective exit is canceled.",
+      metaLabel: "Cancels",
+      metaValue: "Protection",
+    },
+    {
+      tone: hasProtection ? "red" : "orange",
+      label: "PROTECT",
+      title: `${exitSide} ${quantityText} ${displaySymbol} · ${protectText}`,
+      detail: hasProtection
+        ? "If this protection fires, the target exit is canceled."
+        : "Add a fixed stop or trailing stop before previewing the bracket.",
+      metaLabel: "Safety",
+      metaValue: hasProtection ? "Protected" : "Missing",
+    },
+  ];
+  const anatomyEffects: PlanAnatomyEffect[] = [
+    { label: "Broker effect", value: "3 linked orders", detail: "One parent entry and two child exits.", tone: "cyan" },
+    { label: "Cancel rule", value: "OCA-style exits", detail: "Target and protection cancel each other.", tone: "purple" },
+    {
+      label: "Protection state",
+      value: hasProtection ? "Covered after fill" : "Protection missing",
+      detail: hasProtection ? "The intended package protects the filled entry." : "Preview stays disabled until protection is complete.",
+      tone: hasProtection ? "green" : "orange",
+    },
+  ];
 
   if (preview) {
     return (
@@ -313,6 +384,14 @@ export function BracketBuilderPanel({
           A bracket sends one entry with its exit already attached: a profit target and a stop
           (or trailing stop), linked so that filling one cancels the other.
         </div>
+
+        <PlanAnatomyPanel
+          title="Bracket order logic"
+          subtitle="The chart shows the prices. This explains the sequence, links, and protection state."
+          badge={req ? "Ready to preview" : "Draft incomplete"}
+          steps={anatomySteps}
+          effects={anatomyEffects}
+        />
 
         <div className="grid gap-3 md:grid-cols-4">
           <label className="space-y-1.5 md:col-span-2">
