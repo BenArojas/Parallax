@@ -846,12 +846,25 @@ export function TwsExecutionAssistantModule() {
       ? depth?.unavailable_reason
       : null;
 
+  /** Repoints the chart at a different instrument — used by every "edit this
+   * ticker" entry point (Modify, Manage package) so the chart never keeps
+   * showing whatever was charted before. Resets draft prices too, matching
+   * the same-symbol-change reset used everywhere else; exchange/company name
+   * aren't available on an order/package snapshot, so they clear rather than
+   * show stale info for the wrong instrument. */
+  function pointChartAt(conid: number, symbol: string) {
+    setPlanForm((f) => ({ ...f, symbol, conid, limit_price: null, stop_price: null }));
+    setSelectedExchange("");
+    setSelectedCompanyName("");
+  }
+
   /** Single entry point for "Modify" anywhere in Open Orders (standalone rows
    * or from inside a package manager panel). Clears every other transient
    * Execution Plan view first — otherwise the panel's priority ternary would
    * keep showing whichever managed-package view was already open instead of
    * the modify form, the same silently-does-nothing bug class hit before. */
   function focusOrderForModify(order: OrderSnapshot) {
+    pointChartAt(order.conid, order.symbol);
     setManagedScaleOutPackageId(null);
     setManagedBracketPackageId(null);
     setPlanMode("standard");
@@ -1970,6 +1983,7 @@ export function TwsExecutionAssistantModule() {
                         key={pkg.packageId}
                         pkg={pkg}
                         onManage={() => {
+                          pointChartAt(pkg.conid, pkg.symbol);
                           setAdvancedReject(null);
                           setEditingOrder(null);
                           setManagedBracketPackageId(null);
@@ -1982,6 +1996,7 @@ export function TwsExecutionAssistantModule() {
                         key={pkg.packageId}
                         pkg={pkg}
                         onManage={() => {
+                          pointChartAt(pkg.conid, pkg.symbol);
                           setAdvancedReject(null);
                           setEditingOrder(null);
                           setManagedScaleOutPackageId(null);
