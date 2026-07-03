@@ -1084,7 +1084,7 @@ export function TwsExecutionAssistantModule() {
               {managedScaleOutPackage != null ? (
                 <ScaleOutPackageManagerPanel
                   pkg={managedScaleOutPackage}
-                  onCancel={(id) => cancelOrderMutation.mutate(id)}
+                  onCancelLot={(ids) => ids.forEach((id) => cancelOrderMutation.mutate(id))}
                   onClose={() => setManagedScaleOutPackageId(null)}
                 />
               ) : managedBracketPackage != null ? (

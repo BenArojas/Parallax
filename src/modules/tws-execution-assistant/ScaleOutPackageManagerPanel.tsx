@@ -10,56 +10,56 @@ function priceDisplay(order: OrderSnapshot): string {
   return "—";
 }
 
-/** Cancel-only, click-to-confirm — mirrors OrderRow's cancel button. No
- * per-leg Modify here: replacing a scale-out lot's matched exit orders
- * together needs its own safety review and isn't built yet. Cancel carries
- * no such coordination risk — it's the same single-order cancel every other
- * flow already uses, so an armed live session can always get out. */
-function CancelCell({ orderId, onCancel }: { orderId: number; onCancel: (order_id: number) => void }) {
+/** Cancel-only, click-to-confirm, whole-lot — mirrors OrderRow's cancel
+ * button. Deliberately no per-leg cancel: canceling just a lot's stop (or
+ * just its target) leaves the other exit live with nothing protecting it,
+ * an asymmetric exposure the user never chose. Cancel carries none of the
+ * coordinated-replace risk that blocks modify — each leg's cancel is the
+ * same order-agnostic cancelOrder() every other flow already uses, just
+ * fired for the whole lot's order ids together. No per-leg Modify either:
+ * replacing a lot's matched exit orders together needs its own safety
+ * review and isn't built yet. */
+function CancelLotButton({ orderIds, onCancelLot }: { orderIds: number[]; onCancelLot: (order_ids: number[]) => void }) {
   const [confirming, setConfirming] = useState(false);
   if (confirming) {
     return (
-      <td className="whitespace-nowrap py-1">
-        <div className="flex items-center gap-1 rounded-full border border-[var(--clr-red)]/40 bg-[var(--clr-red)]/8 px-2 py-0.5">
-          <span className="text-[9px] text-[var(--text-3)]">Sure?</span>
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 text-[9px] font-semibold text-[var(--clr-red)] hover:bg-[var(--clr-red)]/20 active:scale-95"
-            onClick={() => { onCancel(orderId); setConfirming(false); }}
-          >
-            Yes
-          </button>
-          <button
-            type="button"
-            className="rounded px-1 py-0.5 text-[10px] leading-none text-[var(--text-3)] hover:text-[var(--text-1)]"
-            onClick={() => setConfirming(false)}
-          >
-            ✕
-          </button>
-        </div>
-      </td>
+      <div className="flex items-center gap-1 rounded-full border border-[var(--clr-red)]/40 bg-[var(--clr-red)]/8 px-2 py-0.5">
+        <span className="text-[9px] text-[var(--text-3)]">Cancel whole lot?</span>
+        <button
+          type="button"
+          className="rounded px-1.5 py-0.5 text-[9px] font-semibold text-[var(--clr-red)] hover:bg-[var(--clr-red)]/20 active:scale-95"
+          onClick={() => { onCancelLot(orderIds); setConfirming(false); }}
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          className="rounded px-1 py-0.5 text-[10px] leading-none text-[var(--text-3)] hover:text-[var(--text-1)]"
+          onClick={() => setConfirming(false)}
+        >
+          ✕
+        </button>
+      </div>
     );
   }
   return (
-    <td className="whitespace-nowrap py-1">
-      <button
-        type="button"
-        className="h-5 rounded border border-[var(--clr-red)]/50 px-1.5 text-[10px] text-[var(--clr-red)] hover:bg-[var(--clr-red)]/10 active:scale-95"
-        onClick={() => setConfirming(true)}
-      >
-        Cancel
-      </button>
-    </td>
+    <button
+      type="button"
+      className="h-5 rounded border border-[var(--clr-red)]/50 px-1.5 text-[10px] text-[var(--clr-red)] hover:bg-[var(--clr-red)]/10 active:scale-95"
+      onClick={() => setConfirming(true)}
+    >
+      Cancel lot
+    </button>
   );
 }
 
 export function ScaleOutPackageManagerPanel({
   pkg,
-  onCancel,
+  onCancelLot,
   onClose,
 }: {
   pkg: ScaleOutOrderPackage;
-  onCancel: (order_id: number) => void;
+  onCancelLot: (order_ids: number[]) => void;
   onClose: () => void;
 }) {
   return (
@@ -93,7 +93,10 @@ export function ScaleOutPackageManagerPanel({
           const rows = [lot.entry, ...lot.exits].filter((o): o is OrderSnapshot => o != null);
           return (
             <div key={lot.lotIndex} className="border-b border-border/40 pb-2 last:border-b-0">
-              <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-3)]">Lot {lot.lotIndex + 1}</p>
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-[10px] uppercase tracking-wide text-[var(--text-3)]">Lot {lot.lotIndex + 1}</p>
+                <CancelLotButton orderIds={rows.map((o) => o.order_id)} onCancelLot={onCancelLot} />
+              </div>
               <table className="w-full text-left text-[11px]">
                 <thead>
                   <tr className="text-[var(--text-3)]">
@@ -104,8 +107,7 @@ export function ScaleOutPackageManagerPanel({
                     <th className="pb-1 pr-2 font-medium">Price</th>
                     <th className="pb-1 pr-2 font-medium">Status</th>
                     <th className="pb-1 pr-2 font-medium">Parent</th>
-                    <th className="pb-1 pr-2 font-medium">OCA</th>
-                    <th className="pb-1 font-medium">Actions</th>
+                    <th className="pb-1 font-medium">OCA</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -122,8 +124,7 @@ export function ScaleOutPackageManagerPanel({
                       <td className="pr-2 font-data text-[var(--text-2)]">{priceDisplay(o)}</td>
                       <td className="pr-2 text-[var(--text-2)]">{o.status}</td>
                       <td className="pr-2 text-[var(--text-3)]">{o.parent_id ?? "—"}</td>
-                      <td className="pr-2 text-[var(--text-3)]">{o.oca_group ?? "—"}</td>
-                      <CancelCell orderId={o.order_id} onCancel={onCancel} />
+                      <td className="text-[var(--text-3)]">{o.oca_group ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -134,9 +135,10 @@ export function ScaleOutPackageManagerPanel({
       </div>
 
       <div className="shrink-0 rounded border border-border/60 bg-[var(--bg-0)] p-2 text-[11px] leading-5 text-[var(--text-3)]">
-        Each leg can be canceled individually above. Editing a lot's quantity, target, or stop still
-        isn't available here — that means canceling and replacing its matched exit orders together,
-        which needs its own safety review.
+        Cancel acts on the whole lot — canceling just the stop or just the target isn't offered, so a
+        lot never ends up half-protected. Editing a lot's quantity, target, or stop still isn't
+        available here — that means canceling and replacing its matched exit orders together, which
+        needs its own safety review.
       </div>
     </div>
   );
