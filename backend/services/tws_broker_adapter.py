@@ -1290,6 +1290,12 @@ class TwsBrokerAdapter:
                     raise TwsPlaceOrderGuardError("flatten_cancel_timeout")
                 await asyncio.sleep(0.1)
 
+        # A fill's position update can arrive one message behind its
+        # orderStatus — isDone() flipping doesn't guarantee positions() has
+        # caught up yet. A short settle beat costs 0.3s on a panic button;
+        # sizing the close from a stale quantity costs a double market order.
+        await asyncio.sleep(0.3)
+
         # Re-read the position fresh — an exit may have filled during the
         # cancel race, so the pre-cancel quantity could now be stale.
         pos = next((p for p in self._ib.positions() if p.contract.conId == conid), None)
