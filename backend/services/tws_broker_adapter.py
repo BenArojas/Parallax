@@ -8,7 +8,7 @@ import math
 import re
 from datetime import date as date_, datetime, timezone
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import WebSocket
 from ib_async import IB, Contract, Order, PnL, PnLSingle, PriceCondition
@@ -31,6 +31,7 @@ from models.tws_execution_assistant import (
     PositionSnapshot,
     QuoteSnapshot,
     ReconciliationSnapshot,
+    TwsFlattenResult,
     ReconciliationSummary,
     TwsAdapterState,
     TwsAdvancedReject,
@@ -1255,6 +1256,75 @@ class TwsBrokerAdapter:
             status=status_text,
             action="modify",
             message="Modify request sent to TWS.",
+        )
+
+    async def flatten_position(
+        self, conid: int, *, mode: str = "paper", live_policy: object | None = None,
+    ) -> TwsFlattenResult:
+        """Cancel every working order on a conid, then market-close whatever remains.
+
+        Kills all sides (not just exits) — a working add-to-position order is
+        just as inconsistent with "flatten" as a stale stop would be. Cancels
+        are confirmed one by one before any close order is placed: an exit
+        filling instead of cancelling during the race must never be layered
+        with a second market order for the same shares.
+        """
+        self._ensure_order_mutation_allowed(mode=mode, live_policy=live_policy)
+
+        trades = [t for t in self._ib.openTrades() if t.contract.conId == conid]
+        canceled_order_ids: list[int] = []
+        for trade in trades:
+            if trade.isDone():
+                continue
+            self._ib.cancelOrder(trade.order)
+            canceled_order_ids.append(trade.order.orderId)
+
+        # Poll rather than await cancelledEvent directly: a trade may fill
+        # instead of cancel during the race, which never fires cancelledEvent
+        # at all — isDone() is true for either outcome (Cancelled or Filled),
+        # so polling it is the one check that can't hang on that race.
+        deadline = asyncio.get_event_loop().time() + 5.0
+        for trade in trades:
+            while not trade.isDone():
+                if asyncio.get_event_loop().time() >= deadline:
+                    raise TwsPlaceOrderGuardError("flatten_cancel_timeout")
+                await asyncio.sleep(0.1)
+
+        # Re-read the position fresh — an exit may have filled during the
+        # cancel race, so the pre-cancel quantity could now be stale.
+        pos = next((p for p in self._ib.positions() if p.contract.conId == conid), None)
+        if pos is None or pos.position == 0:
+            return TwsFlattenResult(
+                conid=conid,
+                canceled_order_ids=canceled_order_ids,
+                close_order_id=None,
+                closed_quantity=0,
+                side=None,
+                status="already_flat",
+                message="Position was already flat after cancels settled.",
+            )
+
+        side: Literal["BUY", "SELL"] = "SELL" if pos.position > 0 else "BUY"
+        quantity = abs(pos.position)
+        contract = Contract(conId=conid, symbol=pos.contract.symbol, secType="STK", exchange="SMART", currency="USD")
+        order = Order(action=side, orderType="MKT", totalQuantity=quantity, tif="DAY", orderRef=f"ORBIT:TWS:FLATTEN:{conid}")
+
+        trade = self._ib.placeOrder(contract, order)
+        # Same advanced-reject wait as place_order() — see its comment for why
+        # trade.advancedError (not orderStatus.status) is the correct signal.
+        await asyncio.sleep(0.3)
+        if trade.advancedError:
+            raise TwsAdvancedRejectError(_advanced_reject_from_raw(trade.order.orderId, trade.advancedError))
+
+        status_text = trade.orderStatus.status or "sent_to_tws"
+        return TwsFlattenResult(
+            conid=conid,
+            canceled_order_ids=canceled_order_ids,
+            close_order_id=trade.order.orderId,
+            closed_quantity=quantity,
+            side=side,
+            status=status_text,
+            message=f"Canceled {len(canceled_order_ids)} working order(s); sent MKT {side} {quantity} to close.",
         )
 
     # Timeframe → (IBKR barSizeSetting, durationStr)

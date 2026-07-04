@@ -284,6 +284,16 @@ export interface TwsModifyOrderRequest {
   stop_price: number | null;
 }
 
+export interface TwsFlattenResult {
+  conid: number;
+  canceled_order_ids: number[];
+  close_order_id: number | null;
+  closed_quantity: number;
+  side: "BUY" | "SELL" | null;
+  status: string;
+  message: string | null;
+}
+
 export interface TwsAdvancedReject {
   order_id: number | null;
   reason: string;
@@ -438,4 +448,8 @@ export const twsApi = {
     sidecarRequest<TwsOrderPackageSubmission>("POST", "/execution-assistant/order-packages/place-paper", req),
   placeLiveOrderPackage: (req: TwsOrderPackageRequest) =>
     sidecarRequest<TwsOrderPackageSubmission>("POST", "/execution-assistant/order-packages/place-live", req),
+  flattenPaper: (conid: number) =>
+    sidecarRequest<TwsFlattenResult>("POST", `/execution-assistant/positions/${conid}/flatten-paper`),
+  flattenLive: (conid: number) =>
+    sidecarRequest<TwsFlattenResult>("POST", `/execution-assistant/positions/${conid}/flatten-live`),
 } as const;

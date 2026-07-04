@@ -18,6 +18,7 @@ from models.tws_execution_assistant import (
     TwsLiveAllowlistRequest,
     TwsLiveArmRequest,
     TwsLivePolicyStatus,
+    TwsFlattenResult,
     TwsModifyOrderRequest,
     TwsOrderActionResult,
     TwsOrderPackagePreview,
@@ -46,6 +47,7 @@ _GUARD_STATUS: dict[str, int] = {
     "invalid_limit_price": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "invalid_stop_price": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "oca_group_modify_unsupported": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "flatten_cancel_timeout": status.HTTP_409_CONFLICT,
     "paper_port_cannot_arm_live": status.HTTP_403_FORBIDDEN,
     "paper_port_cannot_live_trade": status.HTTP_403_FORBIDDEN,
     "live_session_mismatch": status.HTTP_409_CONFLICT,
@@ -534,6 +536,69 @@ async def override_order(
                 "message": "Override failed unexpectedly. Refresh Open Orders before retrying.",
             },
         )
+
+
+# ── Flatten position ──────────────────────────────────────────────────────────
+
+def _flatten_unknown_outcome(conid: int, exc: Exception) -> HTTPException:
+    log.error("Flatten failed for conid %s: %s", conid, exc)
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "error": "unknown_outcome",
+            "message": (
+                "Flatten failed unexpectedly. Check TWS Open Orders and Positions "
+                "before retrying — some cancels or the close order may have reached TWS."
+            ),
+        },
+    )
+
+
+@router.post("/positions/{conid}/flatten-paper", response_model=TwsFlattenResult)
+async def flatten_position_paper(
+    conid: int,
+    adapter: TwsBrokerAdapter = Depends(get_tws_adapter),
+) -> TwsFlattenResult:
+    try:
+        return await adapter.flatten_position(conid, mode="paper")
+    except TwsPlaceOrderGuardError as exc:
+        raise _guard_http_error(exc)
+    except TwsAdvancedRejectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "advanced_reject", "reject": exc.reject.model_dump()},
+        )
+    except (RuntimeError, OSError, ConnectionError, TimeoutError) as exc:
+        raise _flatten_unknown_outcome(conid, exc)
+
+
+@router.post("/positions/{conid}/flatten-live", response_model=TwsFlattenResult)
+async def flatten_position_live(
+    conid: int,
+    adapter: TwsBrokerAdapter = Depends(get_tws_adapter),
+    policy: TwsLivePolicyService = Depends(get_tws_live_policy),
+) -> TwsFlattenResult:
+    try:
+        policy.assert_live_allowed(
+            account_id=adapter.connected_account_id(),
+            host=adapter.connected_host(),
+            port=adapter.connected_port(),
+            is_connected=adapter.is_connected(),
+            is_paper_port=adapter.is_paper_port(),
+        )
+    except TwsPlaceOrderGuardError as exc:
+        raise _guard_http_error(exc)
+    try:
+        return await adapter.flatten_position(conid, mode="live", live_policy=policy)
+    except TwsPlaceOrderGuardError as exc:
+        raise _guard_http_error(exc)
+    except TwsAdvancedRejectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "advanced_reject", "reject": exc.reject.model_dump()},
+        )
+    except (RuntimeError, OSError, ConnectionError, TimeoutError) as exc:
+        raise _flatten_unknown_outcome(conid, exc)
 
 
 # ── Advanced order packages (Mission 2) ──────────────────────────────────────

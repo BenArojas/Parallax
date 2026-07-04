@@ -6,7 +6,7 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { BROKER_SESSION_KEY } from "@/context/BrokerSessionContext";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
-import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type PositionSnapshot, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
+import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type PositionSnapshot, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsFlattenResult, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { OrderRow } from "./OrderRow";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
@@ -24,6 +24,7 @@ import {
   FlowValueInput,
 } from "./ExecutionPlanFlowSheet";
 import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
+import { ManagePositionPanel } from "./ManagePositionPanel";
 import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
 import { groupBracketOrders, parseBracketOrderRef, type BracketOrderPackage } from "./bracketPackages";
@@ -486,6 +487,9 @@ export function TwsExecutionAssistantModule() {
   const [advancedReject, setAdvancedReject] = useState<TwsAdvancedReject | null>(null);
   const [managedScaleOutPackageId, setManagedScaleOutPackageId] = useState<string | null>(null);
   const [managedBracketPackageId, setManagedBracketPackageId] = useState<string | null>(null);
+  const [managedPositionConid, setManagedPositionConid] = useState<number | null>(null);
+  const [flattenResult, setFlattenResult] = useState<TwsFlattenResult | null>(null);
+  const [flattenErrorMsg, setFlattenErrorMsg] = useState<string | null>(null);
 
   // Reviewed or already-submitted — the draft is no longer being edited, so
   // its chart lines lock and mode switching is disabled to prevent the plan
@@ -578,6 +582,7 @@ export function TwsExecutionAssistantModule() {
   const { packages: bracketPackages, standaloneOrders } = groupBracketOrders(afterScaleOut, recon?.package_warnings ?? []);
   const managedScaleOutPackage = scaleOutPackages.find((p) => p.packageId === managedScaleOutPackageId) ?? null;
   const managedBracketPackage = bracketPackages.find((p) => p.packageId === managedBracketPackageId) ?? null;
+  const managedPosition = recon?.positions.find((p) => p.conid === managedPositionConid) ?? null;
 
   // View-only reference lines for an already-placed package's real orders —
   // shown while Manage Scale-Out/Bracket is open so the chart still gives
@@ -855,6 +860,25 @@ export function TwsExecutionAssistantModule() {
     },
   });
 
+  const flattenMutation = useMutation({
+    mutationFn: (conid: number) =>
+      isLiveSession ? twsApi.flattenLive(conid) : twsApi.flattenPaper(conid),
+    onMutate: () => {
+      setFlattenResult(null);
+      setFlattenErrorMsg(null);
+    },
+    onSuccess: (result) => {
+      setFlattenResult(result);
+    },
+    onError: (err) => {
+      setFlattenErrorMsg(err instanceof ApiError ? err.message : "Flatten failed.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: RECON_KEY });
+      queryClient.invalidateQueries({ queryKey: STATUS_KEY });
+    },
+  });
+
   const searchMutation = useMutation({
     mutationFn: (symbol: string) => twsApi.searchInstruments(symbol),
     onSuccess: (results) => {
@@ -934,6 +958,7 @@ export function TwsExecutionAssistantModule() {
     pointChartAt(order.conid, order.symbol);
     setManagedScaleOutPackageId(null);
     setManagedBracketPackageId(null);
+    setManagedPositionConid(null);
     setPlanMode("standard");
     setEditingOrder(order);
     setModifyForm({ quantity: order.quantity, limit_price: order.lmt_price, stop_price: order.stop_price });
@@ -1243,7 +1268,30 @@ export function TwsExecutionAssistantModule() {
               </div>
             }
           >
-              {managedScaleOutPackage != null ? (
+              {managedPosition != null ? (
+                <ManagePositionPanel
+                  position={managedPosition}
+                  openOrders={recon?.open_orders ?? []}
+                  reviewLocked={reviewLocked}
+                  isLive={isLiveSession}
+                  onFlatten={() => flattenMutation.mutate(managedPosition.conid)}
+                  flattenPending={flattenMutation.isPending}
+                  flattenResult={flattenResult}
+                  flattenError={flattenErrorMsg}
+                  covered={positionProtection(managedPosition, recon?.open_orders ?? []).covered}
+                  needed={positionProtection(managedPosition, recon?.open_orders ?? []).needed}
+                  onPrefillTicket={(side, quantity) => {
+                    setManagedPositionConid(null);
+                    setPlanMode("standard");
+                    setPlanForm((f) => ({ ...f, side, quantity, order_type: "MKT" }));
+                  }}
+                  onClose={() => {
+                    setManagedPositionConid(null);
+                    setFlattenResult(null);
+                    setFlattenErrorMsg(null);
+                  }}
+                />
+              ) : managedScaleOutPackage != null ? (
                 <ScaleOutPackageManagerPanel
                   pkg={managedScaleOutPackage}
                   onCancelLot={(ids) => ids.forEach((id) => cancelOrderMutation.mutate(id))}
@@ -1958,7 +2006,8 @@ export function TwsExecutionAssistantModule() {
                     <th className="pb-1.5 pr-4 font-medium">Daily P&L</th>
                     <th className="pb-1.5 pr-4 font-medium">Unrl P&L</th>
                     <th className="pb-1.5 pr-4 font-medium">Unrl %</th>
-                    <th className="pb-1.5 font-medium">Protection</th>
+                    <th className="pb-1.5 pr-4 font-medium">Protection</th>
+                    <th className="pb-1.5 font-medium" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1994,7 +2043,7 @@ export function TwsExecutionAssistantModule() {
                         <td className={`pr-4 font-data ${pnlClass(unrlPct)}`}>
                           {unrlPct != null ? `${unrlPct.toFixed(1)}%` : "—"}
                         </td>
-                        <td className="font-data">
+                        <td className="pr-4 font-data">
                           {covered === 0 || needed === 0 ? (
                             <span className="text-[var(--text-3)]">—</span>
                           ) : covered < needed ? (
@@ -2002,6 +2051,27 @@ export function TwsExecutionAssistantModule() {
                           ) : (
                             <span className="text-[var(--clr-green)]">{covered}/{needed}</span>
                           )}
+                        </td>
+                        <td className="whitespace-nowrap py-1">
+                          <button
+                            type="button"
+                            disabled={reviewLocked}
+                            title={reviewLocked ? "Finish or cancel the current review first" : undefined}
+                            className="h-5 rounded border border-[var(--clr-cyan)]/50 px-2 text-[10px] text-[var(--clr-cyan)] hover:bg-[var(--clr-cyan)]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (reviewLocked) return;
+                              pointChartAt(p.conid, p.symbol);
+                              setEditingOrder(null);
+                              setManagedScaleOutPackageId(null);
+                              setManagedBracketPackageId(null);
+                              setFlattenResult(null);
+                              setFlattenErrorMsg(null);
+                              setManagedPositionConid(p.conid);
+                            }}
+                          >
+                            Manage
+                          </button>
                         </td>
                       </tr>
                     );
@@ -2047,6 +2117,7 @@ export function TwsExecutionAssistantModule() {
                           setAdvancedReject(null);
                           setEditingOrder(null);
                           setManagedBracketPackageId(null);
+                          setManagedPositionConid(null);
                           setManagedScaleOutPackageId(pkg.packageId);
                         }}
                       />
@@ -2060,6 +2131,7 @@ export function TwsExecutionAssistantModule() {
                           setAdvancedReject(null);
                           setEditingOrder(null);
                           setManagedScaleOutPackageId(null);
+                          setManagedPositionConid(null);
                           setManagedBracketPackageId(pkg.packageId);
                         }}
                       />

@@ -263,6 +263,16 @@ class TwsOrderActionResult(BaseModel):
     message: str | None = None
 
 
+class TwsFlattenResult(BaseModel):
+    conid: int
+    canceled_order_ids: list[int] = []
+    close_order_id: int | None = None
+    closed_quantity: float = 0
+    side: Literal["BUY", "SELL"] | None = None
+    status: str
+    message: str | None = None
+
+
 class TwsModifyOrderRequest(BaseModel):
     quantity: float
     limit_price: float | None = None
