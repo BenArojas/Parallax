@@ -208,6 +208,11 @@ class TwsBrokerAdapter:
             self._recon_changed_task = loop.create_task(self._debounced_recon_broadcast())
 
         def _on_exec_details(trade: Trade, fill: Fill) -> None:
+            # connectAsync's sync replays today's executions through this same
+            # event before _state flips to "connected" — suppress those, or
+            # every reconnect toasts the whole day's fills again.
+            if self._state != "connected":
+                return
             side = "BUY" if fill.execution.side == "BOT" else "SELL"
             event = TwsFillEvent(
                 conid=fill.contract.conId,
