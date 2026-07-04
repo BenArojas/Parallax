@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
 import { ApiError } from "@/lib/sidecarClient";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,7 +15,17 @@ import type { PlanChartLine } from "./TwsCandleChart";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
 import { ScaleOutScenarioCalculator } from "./ScaleOutScenarioCalculator";
 import type { ScaleOutScenarioLot } from "./scaleOutScenario";
-import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
+import {
+  FlowActionButton,
+  FlowField,
+  FlowGuidance,
+  FlowRow,
+  FlowSegmented,
+  FlowSheet,
+  FlowSummary,
+  FlowSymbolSearchRow,
+  FlowValueInput,
+} from "./ExecutionPlanFlowSheet";
 
 interface LotInput {
   quantity: string;
@@ -39,8 +48,6 @@ const EXAMPLE = {
     { ...EMPTY_LOT, quantity: "10", target_price: "135", use_trail: true, trail_value: "2" },
   ],
 };
-
-const LOT_BAR_COLORS = ["bg-[var(--clr-cyan)]", "bg-[var(--clr-green)]", "bg-[var(--clr-purple)]", "bg-[var(--clr-orange)]"];
 
 export function Hint({ text }: { text: string }) {
   return (
@@ -117,29 +124,8 @@ function buildRequest(conid: number, symbol: string, orderType: "MKT" | "LMT", l
   };
 }
 
-/** "→ sell 5 @ $125, protected by a stop at $118" / "...trailing stop $2 below the high" */
-function lotReadout(lot: LotInput): string | null {
-  const qty = Number(lot.quantity);
-  const target = Number(lot.target_price);
-  if (!qty || !target) return null;
-  const exit = lot.use_trail
-    ? Number(lot.trail_value)
-      ? `trailing stop $${Number(lot.trail_value).toFixed(2)} below the high`
-      : null
-    : Number(lot.stop_price)
-      ? `protected by a stop at $${Number(lot.stop_price).toFixed(2)}`
-      : null;
-  if (!exit) return `sell ${qty} @ $${target.toFixed(2)}, then set a stop or trail`;
-  return `sell ${qty} @ $${target.toFixed(2)}, ${exit}`;
-}
-
-function moneyInput(value: string): string {
-  const n = Number(value);
-  return n > 0 ? `$${n.toFixed(2)}` : "missing";
-}
-
-function quantityInput(value: number): string {
-  return value > 0 ? String(value) : "missing";
+function scaleOutSentence(quantity: number, symbol: string): string {
+  return `Plan: Buy ${quantity > 0 ? quantity : "missing"} ${symbol || "symbol"}, then stage each lot with its own exit and protection. Review before sending.`;
 }
 
 export function ScaleOutLadderPanel({
@@ -164,6 +150,7 @@ export function ScaleOutLadderPanel({
   const queryClient = useQueryClient();
   const [conid, setConid] = useState(initialConid ?? 0);
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
+  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentResult | null>(null);
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [orderType, setOrderType] = useState<"MKT" | "LMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
@@ -233,12 +220,14 @@ export function ScaleOutLadderPanel({
   function handleSymbolChange(value: string) {
     setSymbol(value.toUpperCase());
     setConid(0);
+    setSelectedInstrument(null);
     setSearchResults([]);
   }
 
   function resolveInstrument(r: InstrumentResult) {
     setSymbol(r.symbol);
     setConid(r.conid);
+    setSelectedInstrument(r);
     onInstrumentResolved(r);
     setSearchResults([]);
   }
@@ -284,79 +273,11 @@ export function ScaleOutLadderPanel({
     stopPrice: l.use_trail ? null : Number(l.stop_price) || null,
     trailAmount: l.use_trail ? Number(l.trail_value) || null : null,
   }));
-  const displaySymbol = symbol || "symbol";
-  const entryText = orderType === "LMT" ? `LMT ${moneyInput(limitPrice)}` : "MKT";
-  const completeLots = lots.filter((lot) => {
-    const qty = Number(lot.quantity);
-    const target = Number(lot.target_price);
-    const protection = lot.use_trail ? Number(lot.trail_value) : Number(lot.stop_price);
-    return qty > 0 && target > 0 && protection > 0;
-  }).length;
-  const protectedLots = lots.filter((lot) => {
-    const protection = lot.use_trail ? Number(lot.trail_value) : Number(lot.stop_price);
-    return protection > 0;
-  }).length;
-  const anatomySteps: PlanAnatomyStep[] = [
-    {
-      tone: "blue",
-      label: "WHEN",
-      title: "Immediately after submit",
-      detail: "No condition gate. The ladder is ready once every lot can be previewed and submitted.",
-      metaLabel: "State",
-      metaValue: req ? "Ready" : "Draft",
-    },
-    {
-      tone: "cyan",
-      label: "ENTRY",
-      title: `BUY ${quantityInput(totalQty)} ${displaySymbol} · ${entryText}`,
-      detail: "Each lot gets its own parent entry so later exits stay isolated by lot.",
-      metaLabel: "Lots",
-      metaValue: `${lots.length}`,
-    },
-    ...lots.map<PlanAnatomyStep>((lot, index) => {
-      const qty = Number(lot.quantity);
-      const target = Number(lot.target_price);
-      const protection = lot.use_trail ? Number(lot.trail_value) : Number(lot.stop_price);
-      const complete = qty > 0 && target > 0 && protection > 0;
-      const protectionText = lot.use_trail
-        ? protection > 0 ? `trail $${protection.toFixed(2)}` : "trail missing"
-        : protection > 0 ? `stop ${moneyInput(lot.stop_price)}` : "stop missing";
-
-      return {
-        tone: complete ? "green" : "orange",
-        label: `L${index + 1}`,
-        title: `SELL ${quantityInput(qty)} ${displaySymbol} · LMT ${moneyInput(lot.target_price)}`,
-        detail: complete
-          ? `Target exit, ${protectionText}, and end-of-day MOC fallback stay linked inside this lot.`
-          : `Add quantity, target, and ${lot.use_trail ? "trail amount" : "stop"} before previewing this lot.`,
-        metaLabel: "Share",
-        metaValue: totalQty > 0 && qty > 0 ? `${Math.round((qty / totalQty) * 100)}%` : "Missing",
-      };
-    }),
-  ];
-  const anatomyEffects: PlanAnatomyEffect[] = [
-    {
-      label: "Broker effect",
-      value: req ? `${req.lots.length} isolated lots` : `${lots.length} draft lots`,
-      detail: "Each lot previews as its own entry plus linked exits.",
-      tone: "cyan",
-    },
-    {
-      label: "Cancel rule",
-      value: "Per-lot exits",
-      detail: "Target, protection, and fallback cancel each other only within the same lot.",
-      tone: "purple",
-    },
-    {
-      label: "Protection state",
-      value: req ? "Every lot covered" : `${protectedLots}/${lots.length} lots protected`,
-      detail: req
-        ? "A partial fill has its own target, protection, and close fallback."
-        : `${completeLots}/${lots.length} lots have quantity, target, and protection.`,
-      tone: req ? "green" : "orange",
-    },
-  ];
-
+  const estimatedNotional =
+    Number(limitPrice) > 0 && totalQty > 0
+      ? Number(limitPrice) * totalQty
+      : null;
+  const guidance = scaleOutSentence(totalQty, symbol);
   if (preview) {
     return (
       <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
@@ -427,7 +348,7 @@ export function ScaleOutLadderPanel({
             {submission ? (
               <button
                 type="button"
-                className="h-9 rounded-md border border-[var(--clr-cyan)] px-5 text-sm font-semibold text-[var(--clr-cyan)] transition-colors hover:bg-[var(--clr-cyan)]/10 active:scale-[0.96]"
+                className="h-9 rounded-md border border-[var(--clr-cyan)] px-5 text-sm font-semibold text-[var(--clr-cyan)] transition-[background-color,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--clr-cyan)]/10 hover:shadow-sm active:scale-[0.96]"
                 onClick={() => { setPreview(null); setSubmission(null); submitMutation.reset(); }}
               >
                 New ladder
@@ -436,7 +357,7 @@ export function ScaleOutLadderPanel({
               <>
                 <button
                   type="button"
-                  className="h-9 rounded-md bg-[var(--clr-green)] px-5 text-sm font-semibold text-[var(--bg-0)] transition-colors hover:opacity-90 active:scale-[0.96] disabled:opacity-50"
+                  className="h-9 rounded-md bg-[var(--clr-green)] px-5 text-sm font-semibold text-[var(--bg-0)] transition-[opacity,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:opacity-90 hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={submitMutation.isPending}
                   onClick={() => req && submitMutation.mutate(req)}
                 >
@@ -444,7 +365,7 @@ export function ScaleOutLadderPanel({
                 </button>
                 <button
                   type="button"
-                  className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-colors hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]"
+                  className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-[background-color,color,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--bg-0)] hover:text-[var(--text-1)] hover:shadow-sm active:scale-[0.96]"
                   onClick={() => setPreview(null)}
                 >
                   Edit ladder
@@ -459,247 +380,167 @@ export function ScaleOutLadderPanel({
 
   return (
     <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pb-2">
-        <div className="rounded border border-[var(--clr-purple)]/25 bg-[var(--glow-purple)] px-4 py-3 text-xs leading-5 text-[var(--text-2)]">
-          Scale-out ladders split your exit across multiple price targets. Each lot gets its own protective stop
-          (or trailing stop) and an end-of-day fallback — so a partial fill can never leave shares unprotected.
-        </div>
-        <button
-          type="button"
-          className="self-start rounded border border-dashed border-[var(--clr-purple)]/50 px-3 py-1.5 text-xs text-[var(--clr-purple)] transition-colors hover:bg-[var(--glow-purple)] disabled:opacity-50"
-          disabled={!canDraft}
-          onClick={loadExample}
-        >
-          ↻ Try an example: 20 shares, 3 stages
-        </button>
-
-        <PlanAnatomyPanel
-          title="Scale-out ladder logic"
-          subtitle="The chart shows entry, target, and fixed-stop prices. This explains lot isolation, cancel rules, and protection."
-          badge={req ? "Ready to preview" : "Draft incomplete"}
-          steps={anatomySteps}
-          effects={anatomyEffects}
-        />
-
-        <div className="grid gap-3 md:grid-cols-4">
-          <label className="space-y-1.5 md:col-span-2">
-            <span className="text-xs font-medium text-[var(--text-2)]">Symbol</span>
-            <div className="relative">
-              <input
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 pr-9 text-sm uppercase outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-                placeholder="e.g. INTC"
-                value={symbol}
-                disabled={!canDraft}
-                onChange={(e) => handleSymbolChange(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              />
+      <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+        <FlowSheet mode="scale_out">
+          <FlowRow id="scale-symbol">
+            <FlowSymbolSearchRow
+              mode="scale_out"
+              symbol={symbol}
+              placeholder="INTC"
+              conid={conid}
+              companyName={selectedInstrument?.company_name}
+              exchange={selectedInstrument?.primary_exchange || selectedInstrument?.exchange}
+              currency={selectedInstrument?.currency}
+              disabled={!canDraft}
+              searchPending={searchMutation.isPending}
+              onSymbolChange={handleSymbolChange}
+              onSearch={runSearch}
+              searchResults={searchResults}
+              onResolve={resolveInstrument}
+            />
+          </FlowRow>
+          <FlowRow id="scale-entry" className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <FlowField label="Entry type">
+                <FlowSegmented
+                  value={orderType}
+                  options={["LMT", "MKT"] as const}
+                  onChange={setOrderType}
+                  compact
+                  className="flex-nowrap"
+                />
+              </FlowField>
               <button
                 type="button"
-                className="absolute right-2.5 top-2.5 text-[var(--text-3)] hover:text-[var(--clr-purple)] disabled:cursor-not-allowed"
-                disabled={!canDraft || !symbol || searchMutation.isPending}
-                onClick={runSearch}
-                tabIndex={-1}
+                className="rounded-full border border-dashed border-[var(--clr-purple)]/50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--clr-purple)] transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--clr-purple)]/10 hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!canDraft}
+                onClick={loadExample}
               >
-                <Search className="h-4 w-4" strokeWidth={1.7} />
+                Load example
               </button>
             </div>
-            {searchResults.length > 1 && (
-              <ul className="mt-0.5 rounded border border-border bg-[var(--bg-0)] shadow-md">
-                {searchResults.map((r) => (
-                  <li key={r.conid}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-[var(--bg-1)]"
-                      onClick={() => resolveInstrument(r)}
-                    >
-                      <span className="font-medium">{r.symbol}</span>
-                      <span className="text-[var(--text-3)]">
-                        {r.sec_type} · {r.primary_exchange || r.exchange} · {r.currency}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+            {orderType === "LMT" && (
+              <FlowField label="Entry limit">
+                <FlowValueInput
+                  type="number"
+                  step="0.01"
+                  prefix="$"
+                  value={limitPrice}
+                  disabled={!canDraft}
+                  onChange={(event) => setLimitPrice(event.target.value)}
+                />
+              </FlowField>
             )}
-            {conid > 0 && searchResults.length === 0 && (
-              <span className="text-[10px] text-[var(--text-3)]">conid {conid}</span>
-            )}
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-[var(--text-2)]">Entry type</span>
-            <select
-              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-              value={orderType}
-              disabled={!canDraft}
-              onChange={(e) => setOrderType(e.target.value as "MKT" | "LMT")}
-            >
-              <option value="LMT">LMT</option>
-              <option value="MKT">MKT</option>
-            </select>
-          </label>
-          {orderType === "LMT" && (
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-[var(--text-2)]">Entry limit</span>
-              <input
-                type="number"
-                step="0.01"
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-                value={limitPrice}
-                disabled={!canDraft}
-                onChange={(e) => setLimitPrice(e.target.value)}
-              />
-            </label>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          {lots.map((lot, i) => {
-            const readout = lotReadout(lot);
-            return (
-              <div key={i} className="border-b border-border/40 pb-3 last:border-b-0 last:pb-0">
-                <div className="flex flex-wrap items-end gap-3">
-                  <span
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold"
-                    style={{ background: "var(--glow-purple)", color: "var(--clr-purple)" }}
-                  >
-                    {i + 1}
-                  </span>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-[var(--text-2)]">Qty</span>
-                    <input
-                      type="number"
-                      className="h-9 w-20 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-                      value={lot.quantity}
-                      disabled={!canDraft}
-                      onChange={(e) => updateLot(i, { quantity: e.target.value })}
-                    />
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-[var(--text-2)]">Target</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="h-9 w-24 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-                      value={lot.target_price}
-                      disabled={!canDraft}
-                      onChange={(e) => updateLot(i, { target_price: e.target.value })}
-                    />
-                  </label>
-                  <div className="flex items-center gap-1.5 pb-2 text-xs font-medium text-[var(--text-2)]">
-                    <label className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={lot.use_trail}
-                        disabled={!canDraft}
-                        onChange={(e) => updateLot(i, { use_trail: e.target.checked })}
-                      />
-                      Trail
-                    </label>
-                    <Hint text="A trailing stop follows the price up and triggers a sell if it falls back by this much — useful when you don't want to fix the stop in advance." />
+          </FlowRow>
+          <FlowRow id="scale-lots" className="space-y-3">
+            {lots.map((lot, index) => (
+              <div key={index} className="space-y-3 rounded-xl border border-border/70 bg-[var(--bg-0)] px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">Lot</div>
+                    <div className="font-data text-[16px] text-[var(--clr-purple)]">{index + 1}</div>
                   </div>
-                  {lot.use_trail ? (
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-medium text-[var(--text-2)]">Trail $</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        className="h-9 w-20 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-                        value={lot.trail_value}
-                        disabled={!canDraft}
-                        onChange={(e) => updateLot(i, { trail_value: e.target.value })}
-                      />
-                    </label>
-                  ) : (
-                    <label className="space-y-1.5">
-                      <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
-                        Stop <Hint text="A fixed protective stop. If the price falls to this level, the lot sells to limit the loss." />
-                      </span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        className="h-9 w-20 rounded border border-border bg-[var(--bg-1)] px-2.5 font-data text-sm outline-none focus:border-[var(--clr-purple)] disabled:cursor-not-allowed"
-                        value={lot.stop_price}
-                        disabled={!canDraft}
-                        onChange={(e) => updateLot(i, { stop_price: e.target.value })}
-                      />
-                    </label>
-                  )}
                   <button
                     type="button"
-                    className="ml-auto h-9 rounded border border-[var(--clr-red)]/40 px-2.5 text-xs text-[var(--clr-red)] hover:bg-[var(--clr-red)]/10 disabled:opacity-50"
+                    className="rounded-full border border-[var(--clr-red)]/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--clr-red)] transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--clr-red)]/10 hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!canDraft || lots.length <= 1}
-                    onClick={() => setLots((prev) => prev.filter((_, idx) => idx !== i))}
+                    onClick={() => setLots((previous) => previous.filter((_, lotIndex) => lotIndex !== index))}
                   >
                     Remove
                   </button>
                 </div>
-                {readout && (
-                  <p className="mt-2.5 text-xs text-[var(--clr-purple)]">
-                    <span className="text-[var(--text-3)]">→</span> {readout}
-                  </p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FlowField label="Qty">
+                    <FlowValueInput
+                      type="number"
+                      value={lot.quantity}
+                      disabled={!canDraft}
+                      onChange={(event) => updateLot(index, { quantity: event.target.value })}
+                    />
+                  </FlowField>
+                  <FlowField label="Target">
+                    <FlowValueInput
+                      type="number"
+                      step="0.01"
+                      prefix="$"
+                      value={lot.target_price}
+                      disabled={!canDraft}
+                      onChange={(event) => updateLot(index, { target_price: event.target.value })}
+                    />
+                  </FlowField>
+                </div>
+                <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_96px] md:items-end">
+                  <div className="space-y-2">
+                    <FlowField label="Protection">
+                      <FlowSegmented
+                        value={lot.use_trail ? "TRAIL" : "STOP"}
+                        options={["STOP", "TRAIL"] as const}
+                        onChange={(value) => updateLot(index, { use_trail: value === "TRAIL" })}
+                      />
+                    </FlowField>
+                    <p className="text-[10px] text-[var(--text-3)]">
+                      {lot.use_trail ? "Trail stays preview-only until fill." : "Fixed stop anchors the lot."}
+                    </p>
+                  </div>
+                  <FlowField label={lot.use_trail ? "Trail $" : "Stop $"}>
+                    <FlowValueInput
+                      type="number"
+                      step="0.01"
+                      prefix="$"
+                      value={lot.use_trail ? lot.trail_value : lot.stop_price}
+                      disabled={!canDraft}
+                      onChange={(event) => updateLot(index, lot.use_trail ? { trail_value: event.target.value } : { stop_price: event.target.value })}
+                    />
+                  </FlowField>
+                  <div className="rounded-lg border border-border/70 bg-[var(--bg-1)] px-3 py-2 text-center md:text-right">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">Fallback</div>
+                    <div className="mt-1 font-data text-[12px] text-[var(--text-2)]">EOD</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="h-9 w-full rounded-full border border-dashed border-border/80 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-2)] transition-[background-color,color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--bg-0)] hover:text-[var(--text-1)] hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!canDraft}
+              onClick={() => setLots((previous) => [...previous, { ...EMPTY_LOT }])}
+            >
+              Add lot
+            </button>
+          </FlowRow>
+          <FlowRow>
+            <FlowGuidance>{guidance}</FlowGuidance>
+          </FlowRow>
+          <FlowRow id="scale-scenario">
+            <ScaleOutScenarioCalculator entryPrice={entryPrice} lots={scenarioLots} />
+          </FlowRow>
+          {previewMutation.isError && (
+            <FlowRow>
+              <div className="w-full space-y-1">
+                {validationErrors(previewMutation.error).length > 0 ? (
+                  validationErrors(previewMutation.error).map((error, index) => (
+                    <p key={index} className="text-xs text-[var(--clr-red)]">- {error}</p>
+                  ))
+                ) : (
+                  <p className="text-xs text-[var(--clr-red)]">Preview failed — check inputs and TWS connection.</p>
                 )}
               </div>
-            );
-          })}
-          <button
-            type="button"
-            className="h-8 w-full rounded border border-dashed border-border text-xs text-[var(--text-2)] hover:bg-[var(--bg-0)] disabled:opacity-50"
-            disabled={!canDraft}
-            onClick={() => setLots((prev) => [...prev, { ...EMPTY_LOT }])}
-          >
-            + Add another lot
-          </button>
-        </div>
-
-        {totalQty > 0 && (
-          <div className="flex items-center gap-3 text-[10px] text-[var(--text-3)]">
-            <span className="font-data text-[var(--text-1)]">{totalQty}</span>
-            <span>shares total</span>
-            <div className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--bg-0)]">
-              {lots.map((l, i) => {
-                const qty = Number(l.quantity) || 0;
-                if (!qty) return null;
-                return (
-                  <div
-                    key={i}
-                    className={LOT_BAR_COLORS[i % LOT_BAR_COLORS.length]}
-                    style={{ width: `${(qty / totalQty) * 100}%` }}
-                  />
-                );
-              })}
-            </div>
-            <span>{lots.length} {lots.length === 1 ? "lot" : "lots"}</span>
-          </div>
-        )}
-
-        <ScaleOutScenarioCalculator entryPrice={entryPrice} lots={scenarioLots} />
-      </div>
-
-      <div className="shrink-0 flex flex-wrap items-center gap-3 pt-2">
-        <button
-          type="button"
-          className="h-9 rounded-md border border-[var(--clr-purple)] px-4 text-sm font-semibold text-[var(--clr-purple)] transition-colors hover:bg-[var(--clr-purple)]/10 active:scale-[0.96] disabled:opacity-50"
-          disabled={!canDraft || !req || previewMutation.isPending}
-          onClick={() => req && previewMutation.mutate(req)}
-        >
-          {previewMutation.isPending ? "Previewing..." : "Preview ladder"}
-        </button>
-        {!req && (
-          <span className="text-[11px] text-[var(--text-3)]">
-            Fill symbol, conid, entry price, and every lot's quantity/target/stop-or-trail.
-          </span>
-        )}
-        {previewMutation.isError && (
-          <div className="w-full space-y-1">
-            {validationErrors(previewMutation.error).length > 0 ? (
-              validationErrors(previewMutation.error).map((e, i) => (
-                <p key={i} className="text-xs text-[var(--clr-red)]">- {e}</p>
-              ))
-            ) : (
-              <p className="text-xs text-[var(--clr-red)]">Preview failed — check inputs and TWS connection.</p>
-            )}
-          </div>
-        )}
+            </FlowRow>
+          )}
+          <FlowRow>
+            <FlowSummary notional={estimatedNotional != null ? `$${estimatedNotional.toFixed(2)}` : "--"}>
+              <div className="flex flex-col gap-2 sm:items-end">
+                <FlowActionButton
+                  mode="scale_out"
+                  disabled={!canDraft || !req || previewMutation.isPending}
+                  onClick={() => req && previewMutation.mutate(req)}
+                >
+                  {previewMutation.isPending ? "Previewing..." : "Preview ladder"}
+                </FlowActionButton>
+              </div>
+            </FlowSummary>
+          </FlowRow>
+        </FlowSheet>
       </div>
     </div>
   );

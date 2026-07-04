@@ -34,6 +34,7 @@ original rationale behind a shipped feature.
 | TWS broker cockpit UI | — | `2026-06-27-tws-broker-cockpit-ui-design.md` |
 | TWS terminal cockpit redesign | — | `2026-06-28-tws-terminal-cockpit-redesign.md` |
 | TWS order management | `2026-06-28-tws-order-management-implementation.md` | `2026-06-28-tws-order-management-design.md` |
+| TWS execution plan Flow Sheet | `2026-07-04-tws-execution-plan-flow-sheet-implementation.md` | `2026-07-04-tws-execution-plan-flow-sheet-design.md` |
 
 ## What was kept active (not archived)
 

@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Orbit Execution Plan Flow Mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b11;
+      --chrome: #0b111a;
+      --panel: #101821;
+      --sheet: #0b1119;
+      --cell: #121b26;
+      --cell-2: #151f2b;
+      --text: #e9eef6;
+      --muted: #8b98ab;
+      --quiet: #647187;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --shadow: 0 0 0 1px var(--line), 0 18px 48px rgba(0, 0, 0, 0.28);
+      --ring: 0 0 0 1px var(--line);
+      --accent: #11b6d4;
+      --accent-rgb: 17 182 212;
+      --accent-ink: #041014;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #edf2f7;
+      --chrome: #f8fafc;
+      --panel: #ffffff;
+      --sheet: #fbfcfe;
+      --cell: #f3f6fa;
+      --cell-2: #edf2f7;
+      --text: #101827;
+      --muted: #647086;
+      --quiet: #8692a3;
+      --line: rgba(15, 23, 42, 0.09);
+      --line-strong: rgba(15, 23, 42, 0.16);
+      --shadow: 0 0 0 1px var(--line), 0 14px 34px rgba(15, 23, 42, 0.09);
+      --ring: 0 0 0 1px var(--line), 0 1px 2px rgba(15, 23, 42, 0.04);
+      --accent-ink: #041014;
+    }
+
+    [data-mode="standard"] {
+      --accent: #11b6d4;
+      --accent-rgb: 17 182 212;
+    }
+
+    [data-mode="scale"] {
+      --accent: #a855f7;
+      --accent-rgb: 168 85 247;
+    }
+
+    [data-mode="bracket"] {
+      --accent: #f59e0b;
+      --accent-rgb: 245 158 11;
+    }
+
+    [data-mode="advanced"] {
+      --accent: #3b82f6;
+      --accent-rgb: 59 130 246;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+    body { padding: 18px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+
+    .app {
+      max-width: 1620px;
+      margin: 0 auto;
+      overflow: hidden;
+      border-radius: 16px;
+      background: var(--chrome);
+      box-shadow: var(--shadow);
+    }
+
+    .topbar {
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      background: var(--cell);
+      box-shadow: var(--ring);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .brand-kicker {
+      color: var(--quiet);
+      font-size: 10px;
+      font-weight: 850;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+    }
+
+    .brand-title {
+      margin-top: 2px;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 820;
+      letter-spacing: -0.03em;
+      white-space: nowrap;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .pill, .theme {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      border-radius: 9px;
+      padding: 0 10px;
+      background: var(--cell);
+      box-shadow: var(--ring);
+      color: var(--muted);
+      font-weight: 780;
+      white-space: nowrap;
+    }
+
+    .theme:active, .find:active, .tab:active, .primary:active, .status-item:active { transform: scale(0.96); }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--good);
+      box-shadow: 0 0 0 3px rgb(34 197 94 / 0.14);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(460px, 0.9fr) minmax(620px, 1.1fr);
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .panel {
+      min-height: 680px;
+      overflow: hidden;
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--ring);
+    }
+
+    .panel-head {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      border-radius: 999px;
+      background: var(--cell);
+      box-shadow: var(--ring);
+    }
+
+    .tab {
+      min-height: 26px;
+      border: 0;
+      border-radius: 999px;
+      padding: 0 11px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      transition: transform 140ms ease, color 140ms ease, background 140ms ease;
+    }
+
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .sheet-wrap {
+      height: 632px;
+      overflow: auto;
+      padding: 12px;
+    }
+
+    .sheet {
+      position: relative;
+      overflow: hidden;
+      border-radius: 12px;
+      background:
+        linear-gradient(90deg, rgb(var(--accent-rgb) / 0.22), transparent 44%) 0 0 / 100% 1px no-repeat,
+        var(--sheet);
+      box-shadow: var(--ring);
+    }
+
+    .sheet::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 5px;
+      background: linear-gradient(180deg, var(--accent), rgb(var(--accent-rgb) / 0.26));
+    }
+
+    .row {
+      position: relative;
+      display: grid;
+      gap: 10px;
+      padding: 12px 14px 12px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .row:last-child { border-bottom: 0; }
+    .row.instrument { grid-template-columns: minmax(0, 1fr); }
+    .row.two { grid-template-columns: 1fr 1fr; }
+    .row.entry { grid-template-columns: minmax(0, 1.35fr) minmax(140px, 0.65fr); }
+    .row.exits { grid-template-columns: 1fr 1fr; }
+    .row.advanced { grid-template-columns: minmax(0, 1fr); }
+
+    .symbol-line {
+      display: grid;
+      grid-template-columns: minmax(110px, 160px) auto minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+    }
+
+    .symbol-input {
+      min-width: 0;
+      height: 42px;
+      border: 0;
+      border-bottom: 2px solid rgb(var(--accent-rgb) / 0.45);
+      border-radius: 0;
+      background: transparent;
+      color: var(--text);
+      outline: 0;
+      font-size: 32px;
+      line-height: 1;
+      font-weight: 930;
+      letter-spacing: -0.08em;
+      text-transform: uppercase;
+    }
+
+    .symbol-input:focus {
+      border-bottom-color: var(--accent);
+    }
+
+    .find {
+      min-height: 36px;
+      border: 0;
+      border-radius: 9px;
+      padding: 0 13px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-size: 12px;
+      font-weight: 920;
+      box-shadow: 0 8px 18px rgb(var(--accent-rgb) / 0.2);
+      transition: transform 140ms ease, filter 140ms ease;
+    }
+
+    .find:hover { filter: brightness(1.05); }
+
+    .meta {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      line-height: 1.4;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta .conid {
+      color: var(--quiet);
+      font-weight: 820;
+    }
+
+    .label {
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 950;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .cell {
+      min-width: 0;
+      padding: 0;
+    }
+
+    .value {
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: inset 0 -1px 0 var(--line);
+      padding: 0 2px;
+      transition: box-shadow 140ms ease, background 140ms ease;
+    }
+
+    .value:focus-within {
+      background: transparent;
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .value input {
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 870;
+      letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .prefix, .suffix {
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .seg {
+      min-height: 38px;
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 1fr;
+      gap: 2px;
+      border-radius: 9px;
+      padding: 2px;
+      background: var(--cell);
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+
+    .seg button {
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 890;
+      transition: transform 140ms ease, color 140ms ease, background 140ms ease;
+    }
+
+    .seg button:hover { color: var(--text); }
+    .seg button.active {
+      background: rgb(var(--accent-rgb) / 0.17);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.28);
+    }
+
+    .lot-table {
+      display: grid;
+      gap: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .lot {
+      display: grid;
+      grid-template-columns: 44px minmax(64px, 1fr) minmax(68px, 1fr) minmax(68px, 1fr) minmax(58px, 0.8fr);
+      align-items: center;
+      min-height: 38px;
+      border-bottom: 1px solid var(--line);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .lot:last-child { border-bottom: 0; }
+
+    .lot span {
+      min-width: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      border-right: 1px solid var(--line);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .lot span:last-child { border-right: 0; }
+    .lot .id { color: var(--accent); font-weight: 950; }
+
+    .scenario-panel {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+      padding-top: 11px;
+      border-top: 1px solid var(--line);
+    }
+
+    .scenario-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 950;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .scenario-head span {
+      color: var(--quiet);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .scenario {
+      min-width: 0;
+      border-left: 2px solid var(--line-strong);
+      padding-left: 9px;
+    }
+
+    .scenario.best { border-left-color: var(--good); }
+    .scenario.mid { border-left-color: var(--accent); }
+    .scenario.risk { border-left-color: var(--warn); }
+
+    .scenario b {
+      display: block;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 950;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .scenario.best b { color: var(--good); }
+    .scenario.mid b { color: var(--accent); }
+    .scenario.risk b { color: var(--warn); }
+
+    .scenario span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .scenario-bar {
+      position: relative;
+      height: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      margin-top: 8px;
+      background: var(--cell);
+    }
+
+    .scenario-bar::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: var(--bar);
+      border-radius: inherit;
+      background: currentColor;
+      opacity: 0.78;
+    }
+
+    .guide-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+      padding: 12px 14px 12px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgb(var(--accent-rgb) / 0.065);
+    }
+
+    .sentence {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 780;
+      line-height: 1.45;
+      text-wrap: pretty;
+    }
+
+    .sentence strong { color: var(--text); }
+
+    .token {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 6px;
+      padding: 0 7px;
+      background: var(--sheet);
+      box-shadow: inset 0 0 0 1px var(--line);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 930;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .status-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 9px;
+      color: var(--quiet);
+      font-size: 10px;
+      font-weight: 820;
+    }
+
+    .status-item {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      font-size: inherit;
+      font-weight: inherit;
+      transition: transform 140ms ease, color 140ms ease;
+    }
+
+    .status-item::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .status-item.done { color: var(--good); }
+    .status-item.todo { color: var(--warn); }
+    .status-item.active-step { color: var(--accent); }
+
+    .summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px 12px 18px;
+    }
+
+    .notional small {
+      display: block;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 950;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .notional strong {
+      display: block;
+      margin-top: 2px;
+      color: var(--text);
+      font-size: 19px;
+      font-weight: 950;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .primary {
+      min-height: 40px;
+      border: 0;
+      border-radius: 10px;
+      padding: 0 16px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-size: 13px;
+      font-weight: 950;
+      box-shadow: 0 10px 22px rgb(var(--accent-rgb) / 0.22);
+      transition: transform 140ms ease, filter 140ms ease;
+    }
+
+    .primary:hover { filter: brightness(1.05); }
+
+    .chart {
+      padding: 12px;
+    }
+
+    .chart-box {
+      position: relative;
+      min-height: 588px;
+      overflow: hidden;
+      border-radius: 8px;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px),
+        color-mix(in srgb, var(--sheet) 78%, var(--panel));
+      background-size: 64px 64px;
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+
+    .chart-line {
+      position: absolute;
+      left: 40px;
+      right: 40px;
+      height: 1px;
+      background: rgb(var(--accent-rgb) / 0.7);
+    }
+
+    .chart-line.entry { top: 42%; }
+    .chart-line.target { top: 29%; background: rgb(34 197 94 / 0.72); }
+    .chart-line.stop { top: 58%; background: rgb(245 158 11 / 0.74); }
+
+    .chart-tag {
+      position: absolute;
+      right: 34px;
+      transform: translateY(-50%);
+      border-radius: 8px;
+      padding: 5px 8px;
+      background: var(--panel);
+      box-shadow: var(--ring);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .chart-tag.entry { top: 42%; color: var(--accent); }
+    .chart-tag.target { top: 29%; color: var(--good); }
+    .chart-tag.stop { top: 58%; color: var(--warn); }
+
+    .chart-note {
+      position: absolute;
+      left: 18px;
+      bottom: 18px;
+      max-width: 350px;
+      border-radius: 9px;
+      padding: 9px 10px;
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      box-shadow: var(--ring);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      line-height: 1.35;
+    }
+
+    .chart-note strong { color: var(--text); }
+
+    [data-mode="standard"] .scale-only,
+    [data-mode="standard"] .bracket-only,
+    [data-mode="standard"] .advanced-only,
+    [data-mode="scale"] .standard-only,
+    [data-mode="scale"] .bracket-only,
+    [data-mode="scale"] .advanced-only,
+    [data-mode="bracket"] .standard-only,
+    [data-mode="bracket"] .scale-only,
+    [data-mode="bracket"] .advanced-only,
+    [data-mode="advanced"] .standard-only,
+    [data-mode="advanced"] .scale-only,
+    [data-mode="advanced"] .bracket-only {
+      display: none;
+    }
+
+    .flash {
+      animation: flash 680ms ease;
+    }
+
+    @keyframes flash {
+      0%, 100% { background: transparent; }
+      35% { background: rgb(var(--accent-rgb) / 0.12); }
+    }
+
+    @media (max-width: 1100px) {
+      body { padding: 10px; }
+      .workspace { grid-template-columns: 1fr; }
+      .panel { min-height: auto; }
+      .chart-box { min-height: 430px; }
+    }
+
+    @media (max-width: 720px) {
+      .topbar { align-items: flex-start; padding: 12px; }
+      .brand-kicker { display: none; }
+      .brand-title { font-size: 14px; }
+      .top-actions { gap: 6px; }
+      .pill { display: none; }
+      .workspace { padding: 8px; }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .tabs { width: 100%; }
+      .tab { padding: 0 8px; }
+      .sheet-wrap { height: auto; padding: 10px; }
+      .row.entry,
+      .row.exits {
+        grid-template-columns: 1fr;
+      }
+      .symbol-line {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+      .find {
+        min-width: 74px;
+        padding: 0 12px;
+      }
+      .meta {
+        grid-column: 1 / -1;
+      }
+      .meta { white-space: normal; }
+      .scenario-grid { grid-template-columns: 1fr; }
+      .lot { grid-template-columns: 36px repeat(4, minmax(54px, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" data-mode="standard">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">O</div>
+        <div>
+          <div class="brand-kicker">Orbit module</div>
+          <div class="brand-title">TWS Execution Assistant</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="theme" id="themeToggle" type="button">Theme: dark</button>
+        <span class="pill"><span class="dot"></span>Paper TWS connected</span>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Execution Plan</div>
+          <div class="tabs" aria-label="Plan mode">
+            <button class="tab active" data-mode-tab="standard" type="button">Standard</button>
+            <button class="tab" data-mode-tab="scale" type="button">Scale-Out</button>
+            <button class="tab" data-mode-tab="bracket" type="button">Bracket</button>
+            <button class="tab" data-mode-tab="advanced" type="button">Advanced</button>
+          </div>
+        </div>
+
+        <div class="sheet-wrap">
+          <div class="sheet">
+            <section class="row instrument" data-step-row="symbol">
+              <div class="symbol-line">
+                <input class="symbol-input" value="TSLA" aria-label="Symbol search" />
+                <button class="find" type="button">Find</button>
+                <div class="meta">Tesla Inc. / SMART / USD <span class="conid">/ conid 76792991</span></div>
+              </div>
+            </section>
+
+            <section class="row two" data-step-row="size">
+              <div class="cell">
+                <div class="label">Side</div>
+                <div class="seg">
+                  <button class="active" type="button">BUY</button>
+                  <button type="button">SELL</button>
+                </div>
+              </div>
+              <div class="cell">
+                <div class="label">Quantity</div>
+                <div class="value">
+                  <input value="20" inputmode="numeric" aria-label="Quantity" />
+                  <span class="suffix">sh</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="row entry" data-step-row="entry">
+              <div class="cell">
+                <div class="label">Entry type</div>
+                <div class="seg">
+                  <button type="button">MKT</button>
+                  <button class="active" type="button">LMT</button>
+                  <button type="button">STP</button>
+                  <button type="button">STP LMT</button>
+                </div>
+              </div>
+              <div class="cell">
+                <div class="label">Entry limit</div>
+                <div class="value">
+                  <span class="prefix">$</span>
+                  <input value="248.50" inputmode="decimal" aria-label="Entry limit" />
+                </div>
+              </div>
+            </section>
+
+            <section class="row exits bracket-only" data-step-row="exit">
+              <div class="cell">
+                <div class="label">Target</div>
+                <div class="value">
+                  <span class="prefix">$</span>
+                  <input value="260.00" inputmode="decimal" aria-label="Target" />
+                </div>
+              </div>
+              <div class="cell">
+                <div class="label">Stop</div>
+                <div class="value">
+                  <span class="prefix">$</span>
+                  <input value="242.00" inputmode="decimal" aria-label="Stop" />
+                </div>
+              </div>
+            </section>
+
+            <section class="row scale-only" data-step-row="exit">
+              <div class="label">Scale-out lots</div>
+              <div class="lot-table">
+                <div class="lot"><span class="id">L1</span><span>8 sh</span><span>$255</span><span>$244</span><span>EOD</span></div>
+                <div class="lot"><span class="id">L2</span><span>7 sh</span><span>$262</span><span>$246</span><span>EOD</span></div>
+                <div class="lot"><span class="id">L3</span><span>5 sh</span><span>$270</span><span>$248</span><span>EOD</span></div>
+              </div>
+              <div class="scenario-panel">
+                <div class="scenario-head">
+                  Scenario math
+                  <span>estimated from entry, lots, targets, and stops</span>
+                </div>
+                <div class="scenario-grid">
+                  <div class="scenario best" style="--bar: 100%; color: var(--good);">
+                    <b>+$254</b>
+                    <span>All targets hit</span>
+                    <div class="scenario-bar"></div>
+                  </div>
+                  <div class="scenario mid" style="--bar: 44%; color: var(--accent);">
+                    <b>+$32</b>
+                    <span>L1 target, L2/L3 stop</span>
+                    <div class="scenario-bar"></div>
+                  </div>
+                  <div class="scenario risk" style="--bar: 24%; color: var(--warn);">
+                    <b>-$56</b>
+                    <span>All lots stop out</span>
+                    <div class="scenario-bar"></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="row advanced advanced-only" data-step-row="exit">
+              <div class="cell">
+                <div class="label">Advanced rule</div>
+                <div class="seg">
+                  <button class="active" type="button">GTD</button>
+                  <button type="button">MOC</button>
+                  <button type="button">LOC</button>
+                  <button type="button">Price condition</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="guide-row">
+              <div class="sentence standard-only"><strong>Plan:</strong> Buy <span class="token">20 TSLA</span> with a <span class="token">$248.50 limit</span>. Review before sending.</div>
+              <div class="sentence scale-only"><strong>Plan:</strong> Buy <span class="token">20 TSLA</span>, then split exits across <span class="token">3 lots</span> with stops and EOD fallback.</div>
+              <div class="sentence bracket-only"><strong>Plan:</strong> Buy <span class="token">20 TSLA</span>. If filled, attach <span class="token">$260 target</span> and <span class="token">$242 stop</span>.</div>
+              <div class="sentence advanced-only"><strong>Plan:</strong> Buy <span class="token">20 TSLA</span> with an attached rule. Review shows the exact broker effect.</div>
+
+              <div class="status-line" aria-label="Readiness status">
+                <button class="status-item done active-step" data-focus-step="symbol" type="button">Symbol</button>
+                <button class="status-item done" data-focus-step="size" type="button">Size</button>
+                <button class="status-item done" data-focus-step="entry" type="button">Entry</button>
+                <button class="status-item todo" data-focus-step="exit" type="button">Exit</button>
+                <button class="status-item todo" data-focus-step="review" type="button">Review</button>
+              </div>
+            </section>
+
+            <section class="summary" data-step-row="review">
+              <div class="notional">
+                <small>Estimated notional</small>
+                <strong>$4,970.00</strong>
+              </div>
+              <button class="primary standard-only" type="button">Review order</button>
+              <button class="primary scale-only" type="button">Preview ladder</button>
+              <button class="primary bracket-only" type="button">Preview bracket</button>
+              <button class="primary advanced-only" type="button">Preview rule</button>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel chart">
+        <div class="panel-head" style="height: 36px; min-height: 36px; padding: 0 2px 12px; border-bottom: 0;">
+          <div class="panel-title">Chart</div>
+          <span class="pill">Lines on</span>
+        </div>
+        <div class="chart-box">
+          <div class="chart-line target"></div>
+          <div class="chart-line entry"></div>
+          <div class="chart-line stop"></div>
+          <div class="chart-tag target">Target $260</div>
+          <div class="chart-tag entry">Entry $248.50</div>
+          <div class="chart-tag stop">Stop $242</div>
+          <div class="chart-note">
+            <strong>Interaction:</strong> The status words can still focus a missing field. Scale-out adds P/L scenarios; price lines stay on the chart.
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const app = document.querySelector(".app");
+    const themeToggle = document.querySelector("#themeToggle");
+    const tabs = Array.from(document.querySelectorAll("[data-mode-tab]"));
+    const railButtons = Array.from(document.querySelectorAll("[data-focus-step]"));
+
+    themeToggle.addEventListener("click", () => {
+      const next = root.dataset.theme === "dark" ? "light" : "dark";
+      root.dataset.theme = next;
+      themeToggle.textContent = `Theme: ${next}`;
+    });
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const mode = tab.dataset.modeTab;
+        app.dataset.mode = mode;
+        tabs.forEach((candidate) => candidate.classList.toggle("active", candidate === tab));
+      });
+    });
+
+    railButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const row = document.querySelector(`[data-step-row="${button.dataset.focusStep}"]`);
+        railButtons.forEach((candidate) => candidate.classList.toggle("active-step", candidate === button));
+        if (!row) return;
+        row.classList.remove("flash");
+        row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        requestAnimationFrame(() => row.classList.add("flash"));
+      });
+    });
+  </script>
+</body>
+</html>

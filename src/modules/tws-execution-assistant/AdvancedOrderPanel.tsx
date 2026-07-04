@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
 import { ApiError } from "@/lib/sidecarClient";
 import { cn } from "@/lib/utils";
-import { Hint } from "./ScaleOutLadderPanel";
 import {
   twsApi,
   type ExecutionPlanSide,
@@ -13,7 +11,17 @@ import {
   type TwsOrderPackageSubmission,
 } from "./api";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
-import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
+import {
+  FlowActionButton,
+  FlowField,
+  FlowGuidance,
+  FlowRow,
+  FlowSegmented,
+  FlowSheet,
+  FlowSummary,
+  FlowSymbolSearchRow,
+  FlowValueInput,
+} from "./ExecutionPlanFlowSheet";
 
 type AdvancedKind = "trailing_stop" | "gtd" | "moc" | "loc" | "price_condition";
 type TrailOrderType = "TRAIL" | "TRAILLMT";
@@ -40,6 +48,11 @@ const KIND_LABEL: Record<AdvancedKind, string> = {
   price_condition: "Price Condition",
 };
 
+const KIND_ROWS: readonly (readonly AdvancedKind[])[] = [
+  ["trailing_stop", "gtd", "moc"],
+  ["loc", "price_condition"],
+] as const;
+
 function priceConditionSummary(preview: TwsOrderPackagePreview): string | null {
   const leg = preview.legs[0];
   if (!leg || leg.condition_price == null || leg.condition_is_above == null) return null;
@@ -50,24 +63,9 @@ function priceConditionSummary(preview: TwsOrderPackagePreview): string | null {
   return `Wait for ${preview.symbol} ${direction} $${leg.condition_price.toFixed(2)}, then submit ${leg.side} ${leg.quantity} ${orderDesc}.`;
 }
 
-function moneyInput(value: string): string {
-  const n = Number(value);
-  return n > 0 ? `$${n.toFixed(2)}` : "missing";
-}
-
 function quantityInput(value: string): string {
   const n = Number(value);
   return n > 0 ? String(n) : "missing";
-}
-
-function trailInput(mode: "amount" | "percent", value: string): string {
-  const n = Number(value);
-  if (n <= 0) return "missing";
-  return mode === "percent" ? `${n.toFixed(2)}%` : `$${n.toFixed(2)}`;
-}
-
-function displayDateTime(value: string): string {
-  return value ? value.replace("T", " ") : "missing";
 }
 
 function errorCode(err: unknown): string | null {
@@ -225,6 +223,7 @@ export function AdvancedOrderPanel({
   const [kind, setKind] = useState<AdvancedKind>("trailing_stop");
   const [conid, setConid] = useState(initialConid ?? 0);
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
+  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentResult | null>(null);
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [side, setSide] = useState<ExecutionPlanSide>("SELL");
   const [quantity, setQuantity] = useState("");
@@ -273,12 +272,14 @@ export function AdvancedOrderPanel({
   function handleSymbolChange(value: string) {
     setSymbol(value.toUpperCase());
     setConid(0);
+    setSelectedInstrument(null);
     setSearchResults([]);
   }
 
   function resolveInstrument(r: InstrumentResult) {
     setSymbol(r.symbol);
     setConid(r.conid);
+    setSelectedInstrument(r);
     onInstrumentResolved(r);
     setSearchResults([]);
   }
@@ -305,9 +306,7 @@ export function AdvancedOrderPanel({
     limitPrice, stopPrice, trailMode, trailValue, limitOffset, goodTillDate,
     pcOrderType, conditionIsAbove, conditionPrice,
   });
-  const displaySymbol = symbol || "symbol";
-  const conditionDirection = conditionIsAbove ? "above" : "below";
-  const draftReason = (() => {
+  (() => {
     if (!symbol) return "Enter a symbol.";
     if (!conid) return "Resolve symbol to get ConID.";
     if (!Number(quantity)) return "Enter quantity.";
@@ -331,138 +330,11 @@ export function AdvancedOrderPanel({
     }
     return null;
   })();
-  const orderText = (() => {
-    if (kind === "moc") return "MOC";
-    if (kind === "loc") return `LOC ${moneyInput(limitPrice)}`;
-    if (kind === "price_condition") return pcOrderType === "LMT" ? `LMT ${moneyInput(limitPrice)}` : "MKT";
-    if (kind === "trailing_stop") {
-      return `${trailOrderType} trail ${trailInput(trailMode, trailValue)}${trailOrderType === "TRAILLMT" ? ` · offset ${moneyInput(limitOffset)}` : ""}`;
-    }
-    if (gtdOrderType === "LMT") return `GTD LMT ${moneyInput(limitPrice)}`;
-    if (gtdOrderType === "STP") return `GTD STP ${moneyInput(stopPrice)}`;
-    if (gtdOrderType === "STP LMT") return `GTD STP LMT stop ${moneyInput(stopPrice)} · limit ${moneyInput(limitPrice)}`;
-    return `GTD ${gtdOrderType} trail ${trailInput(trailMode, trailValue)}${gtdOrderType === "TRAILLMT" ? ` · offset ${moneyInput(limitOffset)}` : ""}`;
-  })();
-  const timingStep: PlanAnatomyStep = (() => {
-    if (kind === "price_condition") {
-      return {
-        tone: Number(conditionPrice) > 0 ? "blue" : "orange",
-        label: "WHEN",
-        title: `${displaySymbol} trades ${conditionDirection} ${moneyInput(conditionPrice)}`,
-        detail: "TWS holds the condition. The order submits only after this single price gate is met.",
-        metaLabel: "State",
-        metaValue: req ? "Ready" : "Draft",
-      };
-    }
-    if (kind === "moc" || kind === "loc") {
-      return {
-        tone: "blue",
-        label: "WHEN",
-        title: "Closing auction",
-        detail: "The order is intended for the market close rather than immediate continuous trading.",
-        metaLabel: "State",
-        metaValue: req ? "Ready" : "Draft",
-      };
-    }
-    if (kind === "gtd") {
-      return {
-        tone: formatGoodTillDate(goodTillDate) ? "blue" : "orange",
-        label: "WHEN",
-        title: `Good till ${displayDateTime(goodTillDate)}`,
-        detail: "The order can keep working until this local date/time, unless it fills or is canceled first.",
-        metaLabel: "State",
-        metaValue: req ? "Ready" : "Draft",
-      };
-    }
-    return {
-      tone: "blue",
-      label: "WHEN",
-      title: "Immediately after submit",
-      detail: "No condition gate. The trailing stop starts tracking once it is accepted by TWS.",
-      metaLabel: "State",
-      metaValue: req ? "Ready" : "Draft",
-    };
-  })();
-  const behaviorStep: PlanAnatomyStep = (() => {
-    if (kind === "price_condition") {
-      return {
-        tone: Number(conditionPrice) > 0 ? "purple" : "orange",
-        label: "GATE",
-        title: `Condition ${conditionDirection} ${moneyInput(conditionPrice)}`,
-        detail: "This is a broker-side condition, not an Orbit background watcher.",
-        metaLabel: "Trigger",
-        metaValue: "Last trade",
-      };
-    }
-    if (kind === "trailing_stop") {
-      return {
-        tone: Number(trailValue) > 0 ? "green" : "orange",
-        label: "TRAIL",
-        title: `${trailInput(trailMode, trailValue)} ${trailMode === "percent" ? "trail" : "trail amount"}`,
-        detail: side === "SELL"
-          ? "For a sell, the trigger trails below rising highs and fires after a pullback."
-          : "For a buy, the trigger trails above falling lows and fires after a bounce.",
-        metaLabel: "Type",
-        metaValue: trailOrderType,
-      };
-    }
-    if (kind === "gtd") {
-      return {
-        tone: draftReason == null ? "green" : "orange",
-        label: "EXPIRE",
-        title: `Auto-cancel after ${displayDateTime(goodTillDate)}`,
-        detail: "The order remains normal broker risk while working; GTD only controls its expiration.",
-        metaLabel: "TIF",
-        metaValue: "GTD",
-      };
-    }
-    return {
-      tone: kind === "moc" || req ? "green" : "orange",
-      label: "CLOSE",
-      title: kind === "moc" ? "Market-on-close" : `Limit-on-close ${moneyInput(limitPrice)}`,
-      detail: kind === "moc"
-        ? "MOC seeks execution in the closing auction without a limit cap."
-        : "LOC participates at the close only if the closing price satisfies your limit.",
-      metaLabel: "TIF",
-      metaValue: "Close",
-    };
-  })();
-  const anatomySteps: PlanAnatomyStep[] = [
-    timingStep,
-    {
-      tone: "cyan",
-      label: "ORDER",
-      title: `${side} ${quantityInput(quantity)} ${displaySymbol} · ${orderText}`,
-      detail: "Advanced mode still previews one broker order before any placement.",
-      metaLabel: "Mode",
-      metaValue: KIND_LABEL[kind],
-    },
-    behaviorStep,
-  ];
-  const anatomyEffects: PlanAnatomyEffect[] = [
-    {
-      label: "Broker effect",
-      value: "1 advanced order",
-      detail: "No bracket target, scale-out lot, or child protection is added here.",
-      tone: "cyan",
-    },
-    {
-      label: kind === "price_condition" ? "Condition owner" : "Timing owner",
-      value: kind === "price_condition" ? "TWS gate" : kind === "gtd" ? "TWS expiry" : kind === "moc" || kind === "loc" ? "Close auction" : "Trail engine",
-      detail: kind === "price_condition"
-        ? "Orbit sends the condition; TWS evaluates the trigger."
-        : "Orbit previews the request; broker handling starts after submit.",
-      tone: "blue",
-    },
-    {
-      label: "Review gate",
-      value: draftReason ?? "Ready to preview",
-      detail: draftReason == null
-        ? "Preview uses the existing package preview flow before placement."
-        : "The Preview button stays disabled until this is fixed.",
-      tone: draftReason == null ? "green" : "orange",
-    },
-  ];
+  const guidance = `Plan: ${side === "BUY" ? "Buy" : "Sell"} ${quantityInput(quantity)} ${symbol || "symbol"} with an attached rule. Review shows the exact broker effect.`;
+  const estimatedNotional =
+    Number(quantity) > 0 && Number(limitPrice) > 0
+      ? Number(quantity) * Number(limitPrice)
+      : null;
 
   if (preview) {
     return (
@@ -535,7 +407,7 @@ export function AdvancedOrderPanel({
             {submission ? (
               <button
                 type="button"
-                className="h-9 rounded-md border border-[var(--clr-blue)] px-5 text-sm font-semibold text-[var(--clr-blue)] transition-colors hover:bg-[var(--clr-blue)]/10 active:scale-[0.96]"
+                className="h-9 rounded-md border border-[var(--clr-blue)] px-5 text-sm font-semibold text-[var(--clr-blue)] transition-[background-color,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--clr-blue)]/10 hover:shadow-sm active:scale-[0.96]"
                 onClick={() => { setPreview(null); setSubmission(null); submitMutation.reset(); }}
               >
                 New order
@@ -544,7 +416,7 @@ export function AdvancedOrderPanel({
               <>
                 <button
                   type="button"
-                  className="h-9 rounded-md bg-[var(--clr-green)] px-5 text-sm font-semibold text-[var(--bg-0)] transition-colors hover:opacity-90 active:scale-[0.96] disabled:opacity-50"
+                  className="h-9 rounded-md bg-[var(--clr-green)] px-5 text-sm font-semibold text-[var(--bg-0)] transition-[opacity,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:opacity-90 hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={submitMutation.isPending}
                   onClick={() => req && submitMutation.mutate(req)}
                 >
@@ -552,7 +424,7 @@ export function AdvancedOrderPanel({
                 </button>
                 <button
                   type="button"
-                  className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-colors hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]"
+                  className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-[background-color,color,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--bg-0)] hover:text-[var(--text-1)] hover:shadow-sm active:scale-[0.96]"
                   onClick={() => setPreview(null)}
                 >
                   Edit order
@@ -567,356 +439,188 @@ export function AdvancedOrderPanel({
 
   return (
     <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pb-2">
-        <div className="flex overflow-hidden rounded border border-border text-[11px] font-semibold">
-          {(["trailing_stop", "gtd", "moc", "loc", "price_condition"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={cn(
-                "flex-1 px-2 py-1.5 transition-colors",
-                kind === k ? "bg-[var(--clr-blue)] text-[var(--bg-0)]" : "text-[var(--text-2)] hover:bg-[var(--bg-0)]",
-              )}
-              disabled={!canDraft}
-              onClick={() => setKind(k)}
-            >
-              {KIND_LABEL[k]}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-4">
-          <label className="space-y-1.5 md:col-span-2">
-            <span className="text-xs font-medium text-[var(--text-2)]">Symbol</span>
-            <div className="relative">
-              <input
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 pr-9 text-sm uppercase outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                placeholder="e.g. INTC"
-                value={symbol}
-                disabled={!canDraft}
-                onChange={(e) => handleSymbolChange(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              />
-              <button
-                type="button"
-                className="absolute right-2.5 top-2.5 text-[var(--text-3)] hover:text-[var(--clr-blue)] disabled:cursor-not-allowed"
-                disabled={!canDraft || !symbol || searchMutation.isPending}
-                onClick={runSearch}
-                tabIndex={-1}
-              >
-                <Search className="h-4 w-4" strokeWidth={1.7} />
-              </button>
-            </div>
-            {searchResults.length > 1 && (
-              <ul className="mt-0.5 rounded border border-border bg-[var(--bg-0)] shadow-md">
-                {searchResults.map((r) => (
-                  <li key={r.conid}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-[var(--bg-1)]"
-                      onClick={() => resolveInstrument(r)}
-                    >
-                      <span className="font-medium">{r.symbol}</span>
-                      <span className="text-[var(--text-3)]">
-                        {r.sec_type} · {r.primary_exchange || r.exchange} · {r.currency}
-                      </span>
-                    </button>
-                  </li>
+      <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+        <FlowSheet mode="advanced">
+          <FlowRow id="advanced-rule" className="space-y-4">
+            <FlowField label="Rule type">
+              <div className="space-y-2">
+                {KIND_ROWS.map((row, index) => (
+                  <div key={index} className="flex justify-center">
+                    <FlowSegmented
+                      value={kind}
+                      options={row}
+                      onChange={setKind}
+                      getLabel={(value) => KIND_LABEL[value]}
+                      className="justify-center"
+                    />
+                  </div>
                 ))}
-              </ul>
-            )}
-            {conid > 0 && searchResults.length === 0 && (
-              <span className="text-[10px] text-[var(--text-3)]">conid {conid}</span>
-            )}
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-[var(--text-2)]">Side</span>
-            <select
-              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-              value={side}
+              </div>
+            </FlowField>
+          </FlowRow>
+          <FlowRow id="advanced-symbol">
+            <FlowSymbolSearchRow
+              mode="advanced"
+              symbol={symbol}
+              placeholder="INTC"
+              conid={conid}
+              companyName={selectedInstrument?.company_name}
+              exchange={selectedInstrument?.primary_exchange || selectedInstrument?.exchange}
+              currency={selectedInstrument?.currency}
               disabled={!canDraft}
-              onChange={(e) => setSide(e.target.value as ExecutionPlanSide)}
-            >
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
-            </select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-[var(--text-2)]">Quantity</span>
-            <input
-              type="number"
-              className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-              value={quantity}
-              disabled={!canDraft}
-              onChange={(e) => setQuantity(e.target.value)}
+              searchPending={searchMutation.isPending}
+              onSymbolChange={handleSymbolChange}
+              onSearch={runSearch}
+              searchResults={searchResults}
+              onResolve={resolveInstrument}
             />
-          </label>
-        </div>
-
-        <PlanAnatomyPanel
-          title={`${KIND_LABEL[kind]} logic`}
-          subtitle="This explains timing, broker ownership, and the preview gate without adding a second price map."
-          badge={req ? "Ready to preview" : "Draft incomplete"}
-          steps={anatomySteps}
-          effects={anatomyEffects}
-        />
-
-        {kind === "trailing_stop" && (
-          <>
-            <div className="grid gap-3 md:grid-cols-4">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
-                <select
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={trailOrderType}
-                  disabled={!canDraft}
-                  onChange={(e) => setTrailOrderType(e.target.value as TrailOrderType)}
-                >
-                  <option value="TRAIL">TRAIL</option>
-                  <option value="TRAILLMT">TRAILLMT</option>
-                </select>
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Trail</span>
-                <select
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={trailMode}
-                  disabled={!canDraft}
-                  onChange={(e) => setTrailMode(e.target.value as "amount" | "percent")}
-                >
-                  <option value="amount">Amount $</option>
-                  <option value="percent">Percent %</option>
-                </select>
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Value</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={trailValue}
-                  disabled={!canDraft}
-                  onChange={(e) => setTrailValue(e.target.value)}
-                />
-              </label>
-              {trailOrderType === "TRAILLMT" && (
-                <label className="space-y-1.5">
-                  <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
-                    Limit offset <Hint text="How far below (sell) or above (buy) the trail's trigger price the limit is set once it fires." />
-                  </span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                    value={limitOffset}
-                    disabled={!canDraft}
-                    onChange={(e) => setLimitOffset(e.target.value)}
-                  />
-                </label>
-              )}
+          </FlowRow>
+          <FlowRow className="grid gap-4 md:grid-cols-2">
+            <div id="advanced-size">
+              <FlowField label="Side">
+                <FlowSegmented value={side} options={["BUY", "SELL"] as const} onChange={(value) => setSide(value as ExecutionPlanSide)} compact />
+              </FlowField>
             </div>
-          </>
-        )}
-
-        {kind === "gtd" && (
-          <div className="grid gap-3 md:grid-cols-4">
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
-              <select
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                value={gtdOrderType}
-                disabled={!canDraft}
-                onChange={(e) => setGtdOrderType(e.target.value as GtdOrderType)}
-              >
-                <option value="LMT">LMT</option>
-                <option value="STP">STP</option>
-                <option value="STP LMT">STP LMT</option>
-                <option value="TRAIL">TRAIL</option>
-                <option value="TRAILLMT">TRAILLMT</option>
-              </select>
-            </label>
-            {(gtdOrderType === "LMT" || gtdOrderType === "STP LMT") && (
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Limit</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={limitPrice}
-                  disabled={!canDraft}
-                  onChange={(e) => setLimitPrice(e.target.value)}
-                />
-              </label>
-            )}
-            {(gtdOrderType === "STP" || gtdOrderType === "STP LMT") && (
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Stop</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={stopPrice}
-                  disabled={!canDraft}
-                  onChange={(e) => setStopPrice(e.target.value)}
-                />
-              </label>
-            )}
-            {(gtdOrderType === "TRAIL" || gtdOrderType === "TRAILLMT") && (
-              <>
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium text-[var(--text-2)]">Trail</span>
-                  <select
-                    className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                    value={trailMode}
-                    disabled={!canDraft}
-                    onChange={(e) => setTrailMode(e.target.value as "amount" | "percent")}
-                  >
-                    <option value="amount">Amount $</option>
-                    <option value="percent">Percent %</option>
-                  </select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium text-[var(--text-2)]">Value</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                    value={trailValue}
-                    disabled={!canDraft}
-                    onChange={(e) => setTrailValue(e.target.value)}
+            <FlowField label="Quantity">
+              <FlowValueInput type="number" suffix="sh" value={quantity} disabled={!canDraft} onChange={(event) => setQuantity(event.target.value)} />
+            </FlowField>
+          </FlowRow>
+          {kind === "trailing_stop" && (
+            <FlowRow className="space-y-4">
+              <FlowField label="Order type">
+                <FlowSegmented value={trailOrderType} options={["TRAIL", "TRAILLMT"] as const} onChange={setTrailOrderType} compact />
+              </FlowField>
+              <div className="grid gap-4 md:grid-cols-4">
+                <FlowField label="Trail mode">
+                  <div className="space-y-2">
+                    <FlowSegmented
+                      value={trailMode}
+                      options={["amount", "percent"] as const}
+                      onChange={setTrailMode}
+                      getLabel={(value) => value === "amount" ? "$" : "%"}
+                      className="justify-center"
+                    />
+                    <p className="text-[10px] text-[var(--text-3)]">$ trails by a fixed amount; % trails by a share of price.</p>
+                  </div>
+                </FlowField>
+                <FlowField label="Value">
+                  <FlowValueInput type="number" step="0.01" value={trailValue} disabled={!canDraft} onChange={(event) => setTrailValue(event.target.value)} />
+                </FlowField>
+                {trailOrderType === "TRAILLMT" && (
+                  <FlowField label="Limit offset">
+                    <FlowValueInput type="number" step="0.01" value={limitOffset} disabled={!canDraft} onChange={(event) => setLimitOffset(event.target.value)} />
+                  </FlowField>
+                )}
+              </div>
+            </FlowRow>
+          )}
+          {kind === "gtd" && (
+            <FlowRow className="space-y-4">
+              <FlowField label="Order type">
+                <FlowSegmented value={gtdOrderType} options={["LMT", "STP", "STP LMT", "TRAIL", "TRAILLMT"] as const} onChange={setGtdOrderType} compact />
+              </FlowField>
+              <div className="grid gap-4 md:grid-cols-4">
+                {(gtdOrderType === "LMT" || gtdOrderType === "STP LMT") && (
+                  <FlowField label="Limit">
+                    <FlowValueInput type="number" step="0.01" prefix="$" value={limitPrice} disabled={!canDraft} onChange={(event) => setLimitPrice(event.target.value)} />
+                  </FlowField>
+                )}
+                {(gtdOrderType === "STP" || gtdOrderType === "STP LMT") && (
+                  <FlowField label="Stop">
+                    <FlowValueInput type="number" step="0.01" prefix="$" value={stopPrice} disabled={!canDraft} onChange={(event) => setStopPrice(event.target.value)} />
+                  </FlowField>
+                )}
+                {(gtdOrderType === "TRAIL" || gtdOrderType === "TRAILLMT") && (
+                  <>
+                    <FlowField label="Trail mode">
+                      <FlowSegmented
+                        value={trailMode}
+                        options={["amount", "percent"] as const}
+                        onChange={setTrailMode}
+                        getLabel={(value) => value === "amount" ? "Amount $" : "Percent %"}
+                      />
+                    </FlowField>
+                    <FlowField label="Trail value">
+                      <FlowValueInput type="number" step="0.01" value={trailValue} disabled={!canDraft} onChange={(event) => setTrailValue(event.target.value)} />
+                    </FlowField>
+                    {gtdOrderType === "TRAILLMT" && (
+                      <FlowField label="Limit offset">
+                        <FlowValueInput type="number" step="0.01" value={limitOffset} disabled={!canDraft} onChange={(event) => setLimitOffset(event.target.value)} />
+                      </FlowField>
+                    )}
+                  </>
+                )}
+                <FlowField label="Good till date">
+                  <FlowValueInput type="datetime-local" value={goodTillDate} disabled={!canDraft} onChange={(event) => setGoodTillDate(event.target.value)} />
+                </FlowField>
+              </div>
+            </FlowRow>
+          )}
+          {kind === "moc" && (
+            <FlowRow>
+              <p className="text-[12px] text-[var(--text-2)]">Market-on-close submits into the closing auction without a limit price.</p>
+            </FlowRow>
+          )}
+          {kind === "loc" && (
+            <FlowRow className="grid gap-4 md:grid-cols-2">
+              <FlowField label="Limit">
+                <FlowValueInput type="number" step="0.01" prefix="$" value={limitPrice} disabled={!canDraft} onChange={(event) => setLimitPrice(event.target.value)} />
+              </FlowField>
+              <p className="self-end text-[12px] text-[var(--text-2)]">Limit-on-close joins the close only if the auction price satisfies your limit.</p>
+            </FlowRow>
+          )}
+          {kind === "price_condition" && (
+            <FlowRow className="space-y-4">
+              <FlowField label="Order type">
+                <FlowSegmented value={pcOrderType} options={["MKT", "LMT"] as const} onChange={setPcOrderType} compact />
+              </FlowField>
+              <div className="grid gap-4 md:grid-cols-4">
+                {pcOrderType === "LMT" && (
+                  <FlowField label="Limit">
+                    <FlowValueInput type="number" step="0.01" prefix="$" value={limitPrice} disabled={!canDraft} onChange={(event) => setLimitPrice(event.target.value)} />
+                  </FlowField>
+                )}
+                <FlowField label="Condition">
+                  <FlowSegmented
+                    value={conditionIsAbove ? "above" : "below"}
+                    options={["above", "below"] as const}
+                    onChange={(value) => setConditionIsAbove(value === "above")}
+                    getLabel={(value) => value === "above" ? "Above" : "Below"}
+                    className="flex-nowrap justify-center"
                   />
-                </label>
-              </>
-            )}
-            {gtdOrderType === "TRAILLMT" && (
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Limit offset</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={limitOffset}
-                  disabled={!canDraft}
-                  onChange={(e) => setLimitOffset(e.target.value)}
-                />
-              </label>
-            )}
-            <label className="space-y-1.5 md:col-span-2">
-              <span className="flex items-center gap-1 text-xs font-medium text-[var(--text-2)]">
-                Good till <Hint text="The order stays working until this date and time, in your local time zone." />
-              </span>
-              <input
-                type="datetime-local"
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                value={goodTillDate}
-                disabled={!canDraft}
-                onChange={(e) => setGoodTillDate(e.target.value)}
-              />
-            </label>
-          </div>
-        )}
-
-        {kind === "loc" && (
-          <div className="grid gap-3 md:grid-cols-4">
-            <label className="space-y-1.5">
-              <span className="text-xs font-medium text-[var(--text-2)]">Limit</span>
-              <input
-                type="number"
-                step="0.01"
-                className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                value={limitPrice}
-                disabled={!canDraft}
-                onChange={(e) => setLimitPrice(e.target.value)}
-              />
-            </label>
-          </div>
-        )}
-
-        {kind === "price_condition" && (
-          <>
-            <div className="grid gap-3 md:grid-cols-4">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Condition</span>
-                <select
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={conditionIsAbove ? "above" : "below"}
-                  disabled={!canDraft}
-                  onChange={(e) => setConditionIsAbove(e.target.value === "above")}
-                >
-                  <option value="above">Trades above</option>
-                  <option value="below">Trades below</option>
-                </select>
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Condition price</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={conditionPrice}
-                  disabled={!canDraft}
-                  onChange={(e) => setConditionPrice(e.target.value)}
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
-                <select
-                  className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                  value={pcOrderType}
-                  disabled={!canDraft}
-                  onChange={(e) => setPcOrderType(e.target.value as PriceConditionOrderType)}
-                >
-                  <option value="MKT">MKT</option>
-                  <option value="LMT">LMT</option>
-                </select>
-              </label>
-              {pcOrderType === "LMT" && (
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium text-[var(--text-2)]">Limit</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none focus:border-[var(--clr-blue)] disabled:cursor-not-allowed"
-                    value={limitPrice}
-                    disabled={!canDraft}
-                    onChange={(e) => setLimitPrice(e.target.value)}
-                  />
-                </label>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="shrink-0 flex flex-wrap items-center gap-3 pt-2">
-        <button
-          type="button"
-          className="h-9 rounded-md border border-[var(--clr-blue)] px-4 text-sm font-semibold text-[var(--clr-blue)] transition-colors hover:bg-[var(--clr-blue)]/10 active:scale-[0.96] disabled:opacity-50"
-          disabled={!canDraft || !req || previewMutation.isPending}
-          onClick={() => req && previewMutation.mutate(req)}
-        >
-          {previewMutation.isPending ? "Previewing..." : `Preview ${KIND_LABEL[kind].toLowerCase()}`}
-        </button>
-        {!req && (
-          <span className="text-[11px] text-[var(--text-3)]">
-            {!symbol
-              ? "Enter a symbol to search."
-              : !conid
-                ? "Search and resolve the symbol first — click the search icon or press Enter."
-                : "Fill quantity and this order type's required fields."}
-          </span>
-        )}
-        {previewMutation.isError && (
-          <div className="w-full space-y-1">
-            {validationErrors(previewMutation.error).length > 0 ? (
-              validationErrors(previewMutation.error).map((e, i) => (
-                <p key={i} className="text-xs text-[var(--clr-red)]">- {e}</p>
-              ))
-            ) : (
-              <p className="text-xs text-[var(--clr-red)]">Preview failed — check inputs and TWS connection.</p>
-            )}
-          </div>
-        )}
+                </FlowField>
+                <FlowField label="Trigger price">
+                  <FlowValueInput type="number" step="0.01" prefix="$" value={conditionPrice} disabled={!canDraft} onChange={(event) => setConditionPrice(event.target.value)} />
+                </FlowField>
+              </div>
+            </FlowRow>
+          )}
+          <FlowRow>
+            <FlowGuidance>{guidance}</FlowGuidance>
+          </FlowRow>
+          {previewMutation.isError && (
+            <FlowRow>
+              <div className="w-full space-y-1">
+                {validationErrors(previewMutation.error).length > 0 ? (
+                  validationErrors(previewMutation.error).map((error, index) => (
+                    <p key={index} className="text-xs text-[var(--clr-red)]">- {error}</p>
+                  ))
+                ) : (
+                  <p className="text-xs text-[var(--clr-red)]">Preview failed — check inputs and TWS connection.</p>
+                )}
+              </div>
+            </FlowRow>
+          )}
+          <FlowRow>
+            <FlowSummary notional={estimatedNotional != null ? `$${estimatedNotional.toFixed(2)}` : "--"}>
+              <div className="flex flex-col gap-2 sm:items-end">
+                <FlowActionButton mode="advanced" disabled={!canDraft || !req || previewMutation.isPending} onClick={() => req && previewMutation.mutate(req)}>
+                  {previewMutation.isPending ? "Previewing..." : "Preview order"}
+                </FlowActionButton>
+              </div>
+            </FlowSummary>
+          </FlowRow>
+        </FlowSheet>
       </div>
     </div>
   );

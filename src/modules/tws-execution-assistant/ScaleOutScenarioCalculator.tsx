@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Hint } from "./ScaleOutLadderPanel";
-import { calculateScaleOutScenario, type ScaleOutScenarioExitMode, type ScaleOutScenarioLot } from "./scaleOutScenario";
+import {
+  calculateScaleOutScenario,
+  type ScaleOutScenarioAssumption,
+  type ScaleOutScenarioLot,
+  type ScaleOutScenarioOutcome,
+} from "./scaleOutScenario";
 
 function formatMoney(n: number | null): string {
   if (n == null) return "—";
@@ -18,25 +23,79 @@ export function ScaleOutScenarioCalculator({
   entryPrice: number | null;
   lots: ScaleOutScenarioLot[];
 }) {
-  const [targetsHit, setTargetsHit] = useState(0);
-  const [exitMode, setExitMode] = useState<ScaleOutScenarioExitMode>("stops");
-  const [closePrice, setClosePrice] = useState("");
+  const [assumptions, setAssumptions] = useState<ScaleOutScenarioAssumption[]>(() =>
+    lots.map((_, lotIndex) => ({ lotIndex, outcome: "target", fallbackPrice: null })),
+  );
 
   if (lots.length === 0) return null;
 
-  const targetOptions = Array.from(new Set([0, 1, 2, lots.length])).filter((n) => n <= lots.length);
-  const result = calculateScaleOutScenario({
-    entryPrice,
-    lots,
-    targetsHit,
-    exitMode,
-    closePrice: closePrice ? Number(closePrice) : null,
-  });
+  useEffect(() => {
+    setAssumptions((previous) =>
+      lots.map((_, lotIndex) => previous.find((item) => item.lotIndex === lotIndex) ?? {
+        lotIndex,
+        outcome: "target",
+        fallbackPrice: null,
+      }),
+    );
+  }, [lots]);
 
-  const remainingCount = lots.length - Math.max(0, Math.min(targetsHit, lots.length));
+  const result = calculateScaleOutScenario({ entryPrice, lots, assumptions });
+  const outcomeCounts = useMemo(() => (
+    assumptions.reduce(
+      (counts, assumption) => {
+        counts[assumption.outcome] += 1;
+        return counts;
+      },
+      { target: 0, stop: 0, fallback: 0 } as Record<ScaleOutScenarioOutcome, number>,
+    )
+  ), [assumptions]);
+  const preset = outcomeCounts.target === lots.length
+    ? "all_targets"
+    : outcomeCounts.stop === lots.length
+      ? "all_stops"
+      : "mixed";
+
+  function setPreset(next: "all_targets" | "mixed" | "all_stops") {
+    setAssumptions((previous) =>
+      lots.map((_, lotIndex) => {
+        const current = previous.find((item) => item.lotIndex === lotIndex);
+        if (next === "all_targets") {
+          return { lotIndex, outcome: "target", fallbackPrice: current?.fallbackPrice ?? null };
+        }
+        if (next === "all_stops") {
+          return { lotIndex, outcome: "stop", fallbackPrice: current?.fallbackPrice ?? null };
+        }
+        return {
+          lotIndex,
+          outcome: lotIndex === 0 ? "target" : "stop",
+          fallbackPrice: current?.fallbackPrice ?? null,
+        };
+      }),
+    );
+  }
+
+  function updateAssumption(lotIndex: number, outcome: ScaleOutScenarioOutcome) {
+    setAssumptions((previous) =>
+      previous.map((assumption) => (
+        assumption.lotIndex === lotIndex
+          ? { ...assumption, outcome }
+          : assumption
+      )),
+    );
+  }
+
+  function updateFallbackPrice(lotIndex: number, value: string) {
+    setAssumptions((previous) =>
+      previous.map((assumption) => (
+        assumption.lotIndex === lotIndex
+          ? { ...assumption, fallbackPrice: value ? Number(value) : null }
+          : assumption
+      )),
+    );
+  }
 
   return (
-    <div className="space-y-2.5 rounded border border-border/60 bg-[var(--bg-0)] p-3">
+    <div className="space-y-3 rounded-xl border border-[var(--clr-purple)]/20 bg-[var(--bg-0)] p-3">
       <div className="grid grid-cols-3 gap-2 text-center">
         <div>
           <p className="text-[10px] uppercase tracking-wide text-[var(--text-3)]">Best case</p>
@@ -52,76 +111,87 @@ export function ScaleOutScenarioCalculator({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-[var(--text-3)]">Targets hit</span>
-          <div className="flex overflow-hidden rounded border border-border">
-            {targetOptions.map((n) => (
-              <button
-                key={n}
-                type="button"
-                className={cn(
-                  "h-6 px-2 text-[11px] font-medium transition-colors",
-                  targetsHit === n
-                    ? "bg-[var(--clr-purple)] text-[var(--bg-0)]"
-                    : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-1)]",
-                )}
-                onClick={() => setTargetsHit(n)}
-              >
-                {n === lots.length ? "All" : n}
-              </button>
-            ))}
-          </div>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {[
+          { key: "all_targets", label: "All targets" },
+          { key: "mixed", label: "Mixed" },
+          { key: "all_stops", label: "All stops" },
+        ].map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            className={cn(
+              "rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-transform active:scale-[0.96]",
+              preset === option.key
+                ? "border-[var(--clr-purple)] bg-[var(--clr-purple)] text-white"
+                : "border-border/80 bg-[var(--bg-1)] text-[var(--text-3)] hover:text-[var(--text-2)]",
+            )}
+            onClick={() => setPreset(option.key as "all_targets" | "mixed" | "all_stops")}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
 
-        {remainingCount > 0 && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-[var(--text-3)]">Remaining exit</span>
-            <div className="flex overflow-hidden rounded border border-border">
-              {(["stops", "close"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={cn(
-                    "h-6 px-2 text-[11px] font-medium transition-colors",
-                    exitMode === mode
-                      ? "bg-[var(--clr-purple)] text-[var(--bg-0)]"
-                      : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-1)]",
-                  )}
-                  onClick={() => setExitMode(mode)}
-                >
-                  {mode === "stops" ? "Stops" : "EOD close"}
-                </button>
-              ))}
+      <div className="space-y-2">
+        {lots.map((lot, lotIndex) => {
+          const assumption = assumptions.find((item) => item.lotIndex === lotIndex) ?? {
+            lotIndex,
+            outcome: "target" as const,
+            fallbackPrice: null,
+          };
+          return (
+            <div key={lotIndex} className="rounded-lg border border-border/70 bg-[var(--bg-1)] px-3 py-2">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0">
+                  <div className="font-data text-[11px] text-[var(--text-1)]">
+                    Lot {lotIndex + 1} · {lot.quantity || 0} @ {formatMoney(lot.targetPrice || null)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-[var(--text-3)]">
+                    Stop {formatMoney(lot.stopPrice)} • Trail {formatMoney(lot.trailAmount)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-1">
+                  {(["target", "stop", "fallback"] as const).map((outcome) => (
+                    <button
+                      key={outcome}
+                      type="button"
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-transform active:scale-[0.96]",
+                        assumption.outcome === outcome
+                          ? "border-[var(--clr-purple)] bg-[var(--clr-purple)] text-white"
+                          : "border-border/80 bg-[var(--bg-0)] text-[var(--text-3)] hover:text-[var(--text-2)]",
+                      )}
+                      onClick={() => updateAssumption(lotIndex, outcome)}
+                    >
+                      {outcome === "fallback" ? "EOD" : outcome}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {assumption.outcome === "fallback" && (
+                <label className="mt-2 flex items-center gap-2">
+                  <span className="flex items-center gap-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-3)]">
+                    EOD price
+                    <Hint text="Preview-only close assumption for this lot. It does not change the real target, stop, trail, or broker payload." />
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="h-7 w-24 rounded-full border border-border/80 bg-[var(--bg-0)] px-2 font-data text-[11px] outline-none focus:border-[var(--clr-purple)]"
+                    value={assumption.fallbackPrice ?? ""}
+                    onChange={(event) => updateFallbackPrice(lotIndex, event.target.value)}
+                  />
+                </label>
+              )}
             </div>
-          </div>
-        )}
-
-        {remainingCount > 0 && exitMode === "close" && (
-          <label className="flex items-center gap-1.5">
-            <span className="flex items-center gap-1 text-[11px] text-[var(--text-3)]">
-              Assumed close <Hint text="A price you expect the remaining lots to close at, if neither their target nor stop is hit by end of day." />
-            </span>
-            <input
-              type="number"
-              step="0.01"
-              className="h-6 w-20 rounded border border-border bg-[var(--bg-1)] px-2 font-data text-[11px] outline-none focus:border-[var(--clr-purple)]"
-              value={closePrice}
-              onChange={(e) => setClosePrice(e.target.value)}
-            />
-          </label>
-        )}
+          );
+        })}
       </div>
 
       <p className="text-[11px] text-[var(--text-3)]">
-        {targetsHit} {targetsHit === 1 ? "target" : "targets"} hit ({formatMoney(result.targetGain)})
-        {remainingCount > 0 && (
-          <>
-            {" "}
-            + {remainingCount} {remainingCount === 1 ? "lot" : "lots"} via {exitMode === "stops" ? "stops" : "EOD close"} (
-            {formatMoney(result.remainingExit)})
-          </>
-        )}
+        {outcomeCounts.target} target • {outcomeCounts.stop} stop • {outcomeCounts.fallback} EOD
+        <span className="font-data text-[var(--text-2)]"> · target {formatMoney(result.targetGain)} · other {formatMoney(result.remainingExit)}</span>
       </p>
     </div>
   );

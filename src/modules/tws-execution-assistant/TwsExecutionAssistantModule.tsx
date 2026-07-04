@@ -1,18 +1,28 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, LockKeyhole, Power, Search } from "lucide-react";
+import { CheckCircle2, LockKeyhole, Power } from "lucide-react";
 import { BackToOrbitButton } from "@/components/ui/BackToOrbitButton";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { BROKER_SESSION_KEY } from "@/context/BrokerSessionContext";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
-import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type ExecutionPlanSide, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
+import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { OrderRow } from "./OrderRow";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
 import { BracketBuilderPanel } from "./BracketBuilderPanel";
 import { AdvancedOrderPanel } from "./AdvancedOrderPanel";
-import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
+import {
+  FlowActionButton,
+  FlowField,
+  FlowGuidance,
+  FlowRow,
+  FlowSegmented,
+  FlowSheet,
+  FlowSummary,
+  FlowSymbolSearchRow,
+  FlowValueInput,
+} from "./ExecutionPlanFlowSheet";
 import { ScaleOutPackageManagerPanel } from "./ScaleOutPackageManagerPanel";
 import { BracketPackageManagerPanel } from "./BracketPackageManagerPanel";
 import { groupScaleOutOrders, parseScaleOutOrderRef, type ScaleOutOrderPackage } from "./scaleOutPackages";
@@ -46,30 +56,11 @@ function quantityValue(value: number): string {
   return value > 0 ? String(value) : "missing";
 }
 
-function standardOrderText(plan: ExecutionPlanDraftRequest, fields: ReturnType<typeof priceFieldsFor>): string {
-  if (plan.order_type === "MKT") return "MKT";
-  if (plan.order_type === "LMT") return `LMT ${moneyValue(plan.limit_price)}`;
-  if (plan.order_type === "STP") return `STP ${moneyValue(plan.stop_price)}`;
-  if (fields.includes("stop_price") && fields.includes("limit_price")) {
-    return `STP LMT stop ${moneyValue(plan.stop_price)} · limit ${moneyValue(plan.limit_price)}`;
-  }
-  return plan.order_type;
-}
-
-function standardPriceRequirement(fields: ReturnType<typeof priceFieldsFor>): string {
-  if (fields.includes("stop_price") && fields.includes("limit_price")) return "Stop + limit required";
-  if (fields.includes("stop_price")) return "Stop trigger required";
-  if (fields.includes("limit_price")) return "Limit price required";
-  return "No price required";
-}
-
-function standardPlainEnglish(plan: ExecutionPlanDraftRequest): string {
-  const action = plan.side === "BUY" ? "Buy" : "Sell";
-  const symbol = plan.symbol || "symbol";
-  if (plan.order_type === "MKT") return `${action} ${symbol} at the market after review.`;
-  if (plan.order_type === "LMT") return `${action} ${symbol} only at your limit price or better.`;
-  if (plan.order_type === "STP") return `${action} ${symbol} after the stop trigger is reached.`;
-  return `${action} ${symbol} with a stop trigger, then use your limit price once it activates.`;
+function standardEntryWording(plan: ExecutionPlanDraftRequest): string {
+  if (plan.order_type === "MKT") return "a market entry";
+  if (plan.order_type === "LMT") return `a limit at ${moneyValue(plan.limit_price)}`;
+  if (plan.order_type === "STP") return `a stop at ${moneyValue(plan.stop_price)}`;
+  return `a stop-limit with stop ${moneyValue(plan.stop_price)} and limit ${moneyValue(plan.limit_price)}`;
 }
 
 
@@ -294,7 +285,7 @@ function Panel({
           {headerRight}
         </div>
       </div>
-      <div className="flex-1 min-h-0 p-3">{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col p-3">{children}</div>
     </section>
   );
 }
@@ -965,67 +956,11 @@ export function TwsExecutionAssistantModule() {
     disconnectMutation.isPending;
   const standardDraftReason = saveDraftDisabledReason();
   const standardPriceFields = priceFieldsFor(planForm.order_type);
-  const standardDisplaySymbol = planForm.symbol || "symbol";
-  const standardOrderTitle =
-    `${planForm.side} ${quantityValue(planForm.quantity)} ${standardDisplaySymbol} · ${standardOrderText(planForm, standardPriceFields)}`;
-  const standardPriceRequirementText = standardPriceRequirement(standardPriceFields);
-  const standardHasPriceLine =
-    (standardPriceFields.includes("limit_price") && planForm.limit_price != null && planForm.limit_price > 0) ||
-    (standardPriceFields.includes("stop_price") && planForm.stop_price != null && planForm.stop_price > 0);
-  const standardAnatomySteps: PlanAnatomyStep[] = [
-    {
-      tone: "blue",
-      label: "WHEN",
-      title: "Immediately after submit",
-      detail: "No condition gate. This order is ready once it is reviewed and submitted.",
-      metaLabel: "State",
-      metaValue: standardDraftReason == null ? "Ready" : "Draft",
-    },
-    {
-      tone: "cyan",
-      label: "ORDER",
-      title: standardOrderTitle,
-      detail: "Standard mode sends one independent broker order with no linked target or protective child leg.",
-      metaLabel: "Role",
-      metaValue: "Single",
-    },
-  ];
-  const standardAnatomyEffects: PlanAnatomyEffect[] = [
-    {
-      label: "Broker effect",
-      value: "1 order",
-      detail: "No OCA group, child exit, or package linkage is created.",
-      tone: "cyan",
-    },
-    {
-      label: "Price requirement",
-      value: standardPriceRequirementText,
-      detail: standardPriceFields.length > 0
-        ? standardHasPriceLine
-          ? "The chart owns the visible draft price line."
-          : "Fill the required price field; the chart line appears there."
-        : "Market orders review without a fixed draft price line.",
-      tone: standardDraftReason == null || standardHasPriceLine || standardPriceFields.length === 0 ? "blue" : "orange",
-    },
-    {
-      label: "Review gate",
-      value: standardDraftReason ?? "Ready to review",
-      detail: standardDraftReason == null
-        ? "Review uses the existing preview flow before any placement."
-        : "The Review button stays disabled until this is fixed.",
-      tone: standardDraftReason == null ? "green" : "orange",
-    },
-  ];
+  const standardGuidance = `Plan: ${planForm.side === "BUY" ? "Buy" : "Sell"} ${quantityValue(planForm.quantity)} ${planForm.symbol || "symbol"} with ${standardEntryWording(planForm)}. Review before sending.`;
   const standardEstimatedNotional =
     planForm.limit_price != null && planForm.limit_price > 0 && planForm.quantity > 0
       ? planForm.quantity * planForm.limit_price
       : null;
-  const standardTicketStatus = isLiveSession
-    ? livePolicy?.armed ? "Live armed" : "Live locked"
-    : connected ? "Paper connected" : "Disconnected";
-  const standardTicketStatusTone = isLiveSession
-    ? livePolicy?.armed ? "red" : "orange"
-    : connected ? "green" : "orange";
   const summary = recon ?? status?.reconciliation_summary;
 
   return (
@@ -1199,7 +1134,7 @@ export function TwsExecutionAssistantModule() {
           </div>
         )}
 
-        <div className="grid h-[clamp(560px,calc(100vh-130px),720px)] shrink-0 gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="grid h-[clamp(370px,calc((100vh-130px)*0.65),470px)] shrink-0 gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <Panel
             title="Execution Plan"
             className="h-full"
@@ -1212,8 +1147,8 @@ export function TwsExecutionAssistantModule() {
                   disabled={reviewLocked}
                   title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
-                    planMode === "standard" ? "bg-[var(--clr-cyan)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                    "rounded-full px-2 py-0.5 transition-[background-color,color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40",
+                    planMode === "standard" ? "bg-[var(--clr-cyan)] text-[var(--bg-0)] shadow-sm" : "text-[var(--text-3)] hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]",
                   )}
                   onClick={() => selectPlanMode("standard")}
                 >
@@ -1224,8 +1159,8 @@ export function TwsExecutionAssistantModule() {
                   disabled={reviewLocked}
                   title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
-                    planMode === "scale_out" ? "bg-[var(--clr-purple)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                    "rounded-full px-2 py-0.5 transition-[background-color,color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40",
+                    planMode === "scale_out" ? "bg-[var(--clr-purple)] text-[var(--bg-0)] shadow-sm" : "text-[var(--text-3)] hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]",
                   )}
                   onClick={() => selectPlanMode("scale_out")}
                 >
@@ -1236,8 +1171,8 @@ export function TwsExecutionAssistantModule() {
                   disabled={reviewLocked}
                   title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
-                    planMode === "bracket" ? "bg-[var(--clr-orange)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                    "rounded-full px-2 py-0.5 transition-[background-color,color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40",
+                    planMode === "bracket" ? "bg-[var(--clr-orange)] text-[var(--bg-0)] shadow-sm" : "text-[var(--text-3)] hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]",
                   )}
                   onClick={() => selectPlanMode("bracket")}
                 >
@@ -1248,8 +1183,8 @@ export function TwsExecutionAssistantModule() {
                   disabled={reviewLocked}
                   title={reviewLocked ? "Finish or cancel the current review to change plan type" : undefined}
                   className={cn(
-                    "rounded-full px-2 py-0.5 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
-                    planMode === "advanced" ? "bg-[var(--clr-blue)] text-[var(--bg-0)]" : "text-[var(--text-3)] hover:text-[var(--text-2)]",
+                    "rounded-full px-2 py-0.5 transition-[background-color,color,box-shadow,transform,opacity] duration-150 ease-out enabled:cursor-pointer active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40",
+                    planMode === "advanced" ? "bg-[var(--clr-blue)] text-[var(--bg-0)] shadow-sm" : "text-[var(--text-3)] hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]",
                   )}
                   onClick={() => selectPlanMode("advanced")}
                 >
@@ -1739,239 +1674,124 @@ export function TwsExecutionAssistantModule() {
                   onReviewLocked={handlePanelReviewLocked}
                 />
               ) : (
-                <div className="relative flex h-full flex-col overflow-hidden rounded-lg border border-[#162331] bg-[#05070d] text-slate-100 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-                  <div className={cn("flex-1 min-h-0 overflow-y-auto px-5 py-4", !canDraft && "opacity-45")}>
-                    <div className="mb-4 text-[11px] font-black uppercase tracking-[0.28em] text-slate-400">
-                      Order ticket
-                    </div>
-
-                    <section className="relative rounded-[18px] border border-cyan-500/35 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),rgba(8,13,20,0.96)_44%,rgba(5,7,13,1))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <div className="relative max-w-sm">
-                            <input
-                              className="h-14 w-full rounded-xl border border-transparent bg-transparent pr-12 text-[42px] font-black uppercase leading-none tracking-[-0.02em] text-slate-50 outline-none placeholder:text-slate-600 focus:border-cyan-400/35 focus:bg-black/20"
-                              placeholder="TSLA"
-                              value={planForm.symbol}
-                              disabled={!canDraft}
-                              onChange={(e) => handleSymbolChange(e.target.value)}
-                              onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                <div className="flex h-full flex-col">
+                  <div className={cn("flex-1 min-h-0 overflow-y-auto pb-2", !canDraft && "opacity-45")}>
+                    <FlowSheet mode="standard">
+                      <FlowRow id="standard-symbol">
+                        <FlowSymbolSearchRow
+                          mode="standard"
+                          symbol={planForm.symbol}
+                          placeholder="TSLA"
+                          conid={planForm.conid}
+                          companyName={selectedCompanyName}
+                          exchange={selectedExchange}
+                          disabled={!canDraft}
+                          searchPending={searchMutation.isPending}
+                          onSymbolChange={handleSymbolChange}
+                          onSearch={runSearch}
+                          searchResults={searchResults}
+                          onResolve={(instrument) => {
+                            setPlanForm((f) => ({ ...f, symbol: instrument.symbol, conid: instrument.conid, limit_price: null, stop_price: null }));
+                            setSelectedExchange(instrument.primary_exchange || instrument.exchange);
+                            setSelectedCompanyName(instrument.company_name);
+                            setSearchResults([]);
+                          }}
+                        />
+                      </FlowRow>
+                      <FlowRow className="grid gap-4 md:grid-cols-2">
+                        <div id="standard-size">
+                          <FlowField label="Side">
+                            <FlowSegmented
+                              value={planForm.side}
+                              options={["BUY", "SELL"] as const}
+                              onChange={(side) => setPlanForm((form) => ({ ...form, side }))}
+                              compact
                             />
-                            <button
-                              type="button"
-                              className="absolute right-1 top-2.5 flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-45"
-                              disabled={!canDraft || !planForm.symbol || searchMutation.isPending}
-                              onClick={runSearch}
-                              tabIndex={-1}
-                            >
-                              <Search className="h-5 w-5" strokeWidth={1.8} />
-                            </button>
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] font-semibold text-slate-400">
-                            <span>{selectedCompanyName || (planForm.symbol ? planForm.symbol : "Search symbol")}</span>
-                            <span>/</span>
-                            <span>{selectedExchange || "SMART"}</span>
-                            <span>/</span>
-                            <span>USD</span>
-                            <span>/</span>
-                            <label className="flex items-center gap-1">
-                              <span>conid</span>
-                              <input
-                                type="number"
-                                className="h-6 w-24 rounded border border-white/10 bg-black/20 px-1.5 font-data text-[12px] text-slate-300 outline-none focus:border-cyan-400/45 disabled:cursor-not-allowed"
-                                placeholder="resolve"
-                                value={planForm.conid || ""}
-                                disabled={!canDraft}
-                                onChange={(e) => setPlanForm((f) => ({ ...f, conid: Number(e.target.value) }))}
-                              />
-                            </label>
-                          </div>
-                          {searchResults.length > 1 && (
-                            <ul className="absolute z-20 mt-3 w-[min(520px,calc(100%-2rem))] overflow-hidden rounded-xl border border-cyan-400/25 bg-[#070a11] shadow-2xl">
-                              {searchResults.map((r) => (
-                                <li key={r.conid}>
-                                  <button
-                                    type="button"
-                                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[12px] text-slate-300 hover:bg-cyan-400/10"
-                                    onClick={() => {
-                                      setPlanForm((f) => ({ ...f, conid: r.conid, limit_price: null, stop_price: null }));
-                                      setSelectedExchange(r.primary_exchange || r.exchange);
-                                      setSelectedCompanyName(r.company_name);
-                                      setSearchResults([]);
-                                    }}
-                                  >
-                                    <span className="font-bold text-slate-100">{r.symbol}</span>
-                                    <span className="truncate text-slate-500">
-                                      {r.sec_type} / {r.primary_exchange || r.exchange} / {r.currency}
-                                    </span>
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
+                          </FlowField>
                         </div>
-                        <span
-                          className={cn(
-                            "inline-flex shrink-0 rounded-full border px-4 py-2 text-[13px] font-black",
-                            standardTicketStatusTone === "green" && "border-emerald-400/45 bg-emerald-500/12 text-emerald-300",
-                            standardTicketStatusTone === "orange" && "border-orange-400/45 bg-orange-500/12 text-orange-300",
-                            standardTicketStatusTone === "red" && "border-red-400/45 bg-red-500/12 text-red-300",
-                          )}
-                        >
-                          {standardTicketStatus}
-                        </span>
-                      </div>
-                    </section>
-
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <section className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                        <div className="mb-3 text-[12px] font-black text-slate-400">Side</div>
-                        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.04] p-1">
-                          {(["BUY", "SELL"] as ExecutionPlanSide[]).map((side) => (
-                            <button
-                              key={side}
-                              type="button"
-                              className={cn(
-                                "h-12 rounded-xl text-[14px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
-                                planForm.side === side
-                                  ? side === "BUY"
-                                    ? "bg-emerald-500/22 text-emerald-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                                    : "bg-red-500/20 text-red-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                                  : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300",
-                              )}
-                              disabled={!canDraft}
-                              onClick={() => setPlanForm((f) => ({ ...f, side }))}
-                            >
-                              {side}
-                            </button>
-                          ))}
-                        </div>
-                      </section>
-
-                      <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                        <span className="mb-3 block text-[12px] font-black text-slate-400">Quantity</span>
-                        <div className="flex items-baseline gap-2">
-                          <input
+                        <FlowField label="Quantity">
+                          <FlowValueInput
                             type="number"
-                            className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
+                            suffix="sh"
                             value={planForm.quantity}
                             disabled={!canDraft}
-                            onChange={(e) => setPlanForm((f) => ({ ...f, quantity: Number(e.target.value) }))}
+                            onChange={(event) => setPlanForm((form) => ({ ...form, quantity: Number(event.target.value) }))}
                           />
-                          <span className="font-data text-[30px] font-black text-slate-100">sh</span>
-                        </div>
-                      </label>
-                    </div>
-
-                    <section className="mt-3 rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                      <div className="mb-3 text-[12px] font-black text-slate-400">Order type</div>
-                      <div className="grid gap-2 rounded-2xl bg-white/[0.04] p-1 sm:grid-cols-4">
-                        {(Object.keys(TWS_ORDER_CAPABILITIES) as ExecutionPlanOrderType[]).map((type) => (
-                          <button
-                            key={type}
-                            type="button"
-                            className={cn(
-                              "h-12 rounded-xl font-data text-[14px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
-                              planForm.order_type === type
-                                ? "bg-cyan-400/20 text-cyan-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                                : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300",
+                        </FlowField>
+                      </FlowRow>
+                      <FlowRow id="standard-entry" className="space-y-4">
+                        <FlowField label="Entry type">
+                          <FlowSegmented
+                            value={planForm.order_type}
+                            options={Object.keys(TWS_ORDER_CAPABILITIES) as ExecutionPlanOrderType[]}
+                            onChange={(type) => setPlanForm((form) => ({ ...form, order_type: type, limit_price: null, stop_price: null }))}
+                            compact
+                          />
+                        </FlowField>
+                        {standardPriceFields.length > 0 && (
+                          <div className={cn("grid gap-4", standardPriceFields.length > 1 && "md:grid-cols-2")}>
+                            {standardPriceFields.includes("limit_price") && (
+                              <FlowField label="Limit price">
+                                <FlowValueInput
+                                  type="number"
+                                  step="0.01"
+                                  prefix="$"
+                                  placeholder="0.00"
+                                  value={planForm.limit_price ?? ""}
+                                  disabled={!canDraft}
+                                  onChange={(event) => setPlanForm((form) => ({ ...form, limit_price: Number(event.target.value) || null }))}
+                                />
+                              </FlowField>
                             )}
-                            disabled={!canDraft}
-                            onClick={() => setPlanForm((f) => ({ ...f, order_type: type, limit_price: null, stop_price: null }))}
-                          >
-                            {type}
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-
-                    {standardPriceFields.length > 0 && (
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {standardPriceFields.includes("limit_price") && (
-                          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                            <span className="mb-3 block text-[12px] font-black text-slate-400">Limit price</span>
-                            <div className="flex items-baseline">
-                              <span className="font-data text-[30px] font-black text-slate-50">$</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
-                                placeholder="0.00"
-                                value={planForm.limit_price ?? ""}
-                                disabled={!canDraft}
-                                onChange={(e) => setPlanForm((f) => ({ ...f, limit_price: Number(e.target.value) || null }))}
-                              />
-                            </div>
-                          </label>
+                            {standardPriceFields.includes("stop_price") && (
+                              <FlowField label="Stop trigger">
+                                <FlowValueInput
+                                  type="number"
+                                  step="0.01"
+                                  prefix="$"
+                                  placeholder="0.00"
+                                  value={planForm.stop_price ?? ""}
+                                  disabled={!canDraft}
+                                  onChange={(event) => setPlanForm((form) => ({ ...form, stop_price: Number(event.target.value) || null }))}
+                                />
+                              </FlowField>
+                            )}
+                          </div>
                         )}
-                        {standardPriceFields.includes("stop_price") && (
-                          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                            <span className="mb-3 block text-[12px] font-black text-slate-400">Stop trigger</span>
-                            <div className="flex items-baseline">
-                              <span className="font-data text-[30px] font-black text-slate-50">$</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
-                                placeholder="0.00"
-                                value={planForm.stop_price ?? ""}
-                                disabled={!canDraft}
-                                onChange={(e) => setPlanForm((f) => ({ ...f, stop_price: Number(e.target.value) || null }))}
-                              />
-                            </div>
-                          </label>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mt-3 rounded-[18px] border border-orange-400/25 bg-orange-500/[0.06] px-4 py-3 text-[13px] leading-6 text-slate-400">
-                      <span className="font-black text-slate-100">Plain English:</span> {standardPlainEnglish(planForm)}
-                    </div>
-
-                    <div className="[--bg-0:#070a11] [--bg-1:#0c111a] [--text-1:#f8fafc] [--text-2:#cbd5e1] [--text-3:#7d8ba1] [--border:rgba(148,163,184,0.20)] mt-3">
-                      <PlanAnatomyPanel
-                        title="Standard order logic"
-                        subtitle="The chart shows any price lines. This explains the single broker order and review gate."
-                        badge={standardDraftReason == null ? "Ready to review" : "Draft incomplete"}
-                        steps={standardAnatomySteps}
-                        effects={standardAnatomyEffects}
-                      />
-                    </div>
-
-                    {(currentPlan?.status === "invalid" && currentPlan.validation_errors.length > 0) && (
-                      <ul className="mt-3 space-y-1 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2">
-                        {currentPlan.validation_errors.map((e, i) => (
-                          <li key={i} className="text-xs text-red-300">- {e}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {reviewMutation.isError && currentPlan?.status !== "invalid" && (
-                      <p className="mt-3 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                        {SUBMIT_ERROR_MESSAGES[submitErrorCode(reviewMutation.error) ?? ""] ??
-                          "Review failed — check that TWS is connected and on a paper port."}
-                      </p>
-                    )}
-
-                    <div className="mt-4 flex flex-col gap-3 rounded-[18px] border border-orange-400/25 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <div className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Estimated notional</div>
-                        <div className="mt-1 font-data text-[28px] font-black text-slate-50">
-                          {standardEstimatedNotional != null ? `$${standardEstimatedNotional.toFixed(2)}` : "--"}
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2 sm:items-end">
-                        <button
-                          className="h-14 rounded-2xl bg-cyan-400 px-7 text-[15px] font-black text-[#031018] shadow-[0_12px_28px_rgba(34,211,238,0.22)] transition-transform hover:bg-cyan-300 active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
-                          disabled={!canDraft || reviewMutation.isPending || standardDraftReason != null}
-                          onClick={() => { placeOrderMutation.reset(); reviewMutation.mutate(planForm); }}
-                        >
-                          {reviewMutation.isPending ? "Reviewing..." : "Review order"}
-                        </button>
-                        {canDraft && standardDraftReason != null && (
-                          <span className="max-w-[260px] text-right text-[12px] font-semibold text-slate-500">{standardDraftReason}</span>
-                        )}
-                      </div>
-                    </div>
+                      </FlowRow>
+                      <FlowRow>
+                        <FlowGuidance>{standardGuidance}</FlowGuidance>
+                      </FlowRow>
+                      {((currentPlan?.status === "invalid" && currentPlan.validation_errors.length > 0) || (reviewMutation.isError && currentPlan?.status !== "invalid")) && (
+                        <FlowRow>
+                          {(currentPlan?.status === "invalid" && currentPlan.validation_errors.length > 0) ? (
+                            <ul className="space-y-1 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2">
+                              {currentPlan.validation_errors.map((error, index) => (
+                                <li key={index} className="text-xs text-red-300">- {error}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                              {SUBMIT_ERROR_MESSAGES[submitErrorCode(reviewMutation.error) ?? ""] ??
+                                "Review failed — check that TWS is connected and on a paper port."}
+                            </p>
+                          )}
+                        </FlowRow>
+                      )}
+                      <FlowRow>
+                        <FlowSummary notional={standardEstimatedNotional != null ? `$${standardEstimatedNotional.toFixed(2)}` : "--"}>
+                          <div className="flex flex-col gap-2 sm:items-end">
+                            <FlowActionButton
+                              mode="standard"
+                              disabled={!canDraft || reviewMutation.isPending || standardDraftReason != null}
+                              onClick={() => { placeOrderMutation.reset(); reviewMutation.mutate(planForm); }}
+                            >
+                              {reviewMutation.isPending ? "Reviewing..." : "Review order"}
+                            </FlowActionButton>
+                          </div>
+                        </FlowSummary>
+                      </FlowRow>
+                    </FlowSheet>
                   </div>
 
                   {!canDraft && (
@@ -2075,10 +1895,10 @@ export function TwsExecutionAssistantModule() {
           </aside>
         </div>
 
-        <div className="mt-4 grid gap-1.5 md:grid-cols-2">
+        <div className="mt-6 grid gap-2 md:grid-cols-2">
           <Panel title="Positions">
             {recon && recon.positions.length > 0 ? (
-              <div className="max-h-[160px] overflow-y-auto">
+              <div className="max-h-[194px] overflow-y-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="text-xs text-[var(--text-3)]">
@@ -2109,7 +1929,7 @@ export function TwsExecutionAssistantModule() {
 
           <Panel title="Open Orders">
             {recon && recon.open_orders.length > 0 ? (
-              <div className="max-h-[160px] overflow-y-auto">
+              <div className="max-h-[194px] overflow-y-auto">
                 {recon.unmanaged_order_count > 0 && (
                   <p className="mb-2 text-xs text-[var(--clr-orange)]">
                     {recon.unmanaged_order_count} unmanaged

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
 import { ApiError } from "@/lib/sidecarClient";
 import { cn } from "@/lib/utils";
 import { Hint } from "./ScaleOutLadderPanel";
@@ -12,7 +11,17 @@ import {
   type TwsOrderPackageRequest,
   type TwsOrderPackageSubmission,
 } from "./api";
-import { PlanAnatomyPanel, type PlanAnatomyEffect, type PlanAnatomyStep } from "./PlanAnatomyPanel";
+import {
+  FlowActionButton,
+  FlowField,
+  FlowGuidance,
+  FlowRow,
+  FlowSegmented,
+  FlowSheet,
+  FlowSummary,
+  FlowSymbolSearchRow,
+  FlowValueInput,
+} from "./ExecutionPlanFlowSheet";
 import type { PlanChartLine } from "./TwsCandleChart";
 import { RECON_KEY } from "./TwsExecutionAssistantModule";
 
@@ -37,26 +46,19 @@ function validationErrors(err: unknown): string[] {
   return [];
 }
 
-function moneyInput(value: string): string {
-  const n = Number(value);
-  return n > 0 ? `$${n.toFixed(2)}` : "missing";
-}
-
 function quantityInput(value: string): string {
   const n = Number(value);
   return n > 0 ? String(n) : "missing";
 }
 
-function bracketPlainEnglish(side: ExecutionPlanSide, symbol: string, orderType: "MKT" | "LMT", useTrail: boolean): string {
+function bracketSentence(side: ExecutionPlanSide, quantity: string, symbol: string, targetPrice: string, useTrail: boolean, stopPrice: string, trailValue: string): string {
   const action = side === "BUY" ? "Buy" : "Sell";
   const ticker = symbol || "symbol";
-  const entry = orderType === "LMT" ? "with a limit entry" : "at the market";
-  const protection = useTrail ? "one trailing protective stop" : "one protective stop";
-  return `${action} ${ticker} ${entry}. If filled, attach one profit target and ${protection}.`;
-}
-
-function oppositeSide(side: ExecutionPlanSide): ExecutionPlanSide {
-  return side === "BUY" ? "SELL" : "BUY";
+  const target = Number(targetPrice) > 0 ? `$${Number(targetPrice).toFixed(2)}` : "a target";
+  const protection = useTrail
+    ? Number(trailValue) > 0 ? `a trail of $${Number(trailValue).toFixed(2)}` : "a trail"
+    : Number(stopPrice) > 0 ? `a stop at $${Number(stopPrice).toFixed(2)}` : "a stop";
+  return `Plan: ${action} ${quantityInput(quantity)} ${ticker}. If filled, attach ${target} and ${protection}.`;
 }
 
 /** Build the request from raw form inputs, or null while required fields are incomplete. */
@@ -132,6 +134,7 @@ export function BracketBuilderPanel({
   const queryClient = useQueryClient();
   const [conid, setConid] = useState(initialConid ?? 0);
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
+  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentResult | null>(null);
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [side, setSide] = useState<ExecutionPlanSide>("BUY");
   const [quantity, setQuantity] = useState("");
@@ -204,12 +207,14 @@ export function BracketBuilderPanel({
   function handleSymbolChange(value: string) {
     setSymbol(value.toUpperCase());
     setConid(0);
+    setSelectedInstrument(null);
     setSearchResults([]);
   }
 
   function resolveInstrument(r: InstrumentResult) {
     setSymbol(r.symbol);
     setConid(r.conid);
+    setSelectedInstrument(r);
     onInstrumentResolved(r);
     setSearchResults([]);
   }
@@ -232,68 +237,11 @@ export function BracketBuilderPanel({
   });
 
   const req = buildRequest(conid, symbol, side, quantity, orderType, limitPrice, targetPrice, useTrail, stopPrice, trailValue);
-  const entryText = orderType === "LMT" ? `LMT ${moneyInput(limitPrice)}` : "MKT";
-  const quantityText = quantityInput(quantity);
-  const exitSide = oppositeSide(side);
-  const displaySymbol = symbol || "symbol";
-  const trailNumber = Number(trailValue);
-  const stopNumber = Number(stopPrice);
-  const hasProtection = useTrail ? trailNumber > 0 : stopNumber > 0;
-  const protectText = useTrail
-    ? trailNumber > 0 ? `TRAIL $${trailNumber.toFixed(2)}` : "TRAIL missing"
-    : `STP ${moneyInput(stopPrice)}`;
-  const anatomySteps: PlanAnatomyStep[] = [
-    {
-      tone: "blue",
-      label: "WHEN",
-      title: "Immediately after submit",
-      detail: "No condition gate. This bracket is ready once it is previewed and submitted.",
-      metaLabel: "State",
-      metaValue: req ? "Ready" : "Draft",
-    },
-    {
-      tone: "cyan",
-      label: "ENTER",
-      title: `${side} ${quantityText} ${displaySymbol} · ${entryText}`,
-      detail: "This parent entry controls when the target and protection legs become active.",
-      metaLabel: "Role",
-      metaValue: "Parent",
-    },
-    {
-      tone: "green",
-      label: "EXIT",
-      title: `${exitSide} ${quantityText} ${displaySymbol} · LMT ${moneyInput(targetPrice)}`,
-      detail: "If this target fills, the protective exit is canceled.",
-      metaLabel: "Cancels",
-      metaValue: "Protection",
-    },
-    {
-      tone: hasProtection ? "red" : "orange",
-      label: "PROTECT",
-      title: `${exitSide} ${quantityText} ${displaySymbol} · ${protectText}`,
-      detail: hasProtection
-        ? "If this protection fires, the target exit is canceled."
-        : "Add a fixed stop or trailing stop before previewing the bracket.",
-      metaLabel: "Safety",
-      metaValue: hasProtection ? "Protected" : "Missing",
-    },
-  ];
-  const anatomyEffects: PlanAnatomyEffect[] = [
-    { label: "Broker effect", value: "3 linked orders", detail: "One parent entry and two child exits.", tone: "cyan" },
-    { label: "Cancel rule", value: "OCA-style exits", detail: "Target and protection cancel each other.", tone: "purple" },
-    {
-      label: "Protection state",
-      value: hasProtection ? "Covered after fill" : "Protection missing",
-      detail: hasProtection ? "The intended package protects the filled entry." : "Preview stays disabled until protection is complete.",
-      tone: hasProtection ? "green" : "orange",
-    },
-  ];
+  const guidance = bracketSentence(side, quantity, symbol, targetPrice, useTrail, stopPrice, trailValue);
   const estimatedNotional =
     Number(quantity) > 0 && orderType === "LMT" && Number(limitPrice) > 0
       ? Number(quantity) * Number(limitPrice)
       : null;
-  const ticketStatus = isLiveSession ? "Live session" : connected ? "Paper connected" : "Disconnected";
-
   if (preview) {
     return (
       <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
@@ -360,7 +308,7 @@ export function BracketBuilderPanel({
             {submission ? (
               <button
                 type="button"
-                className="h-9 rounded-md border border-[var(--clr-orange)] px-5 text-sm font-semibold text-[var(--clr-orange)] transition-colors hover:bg-[var(--clr-orange)]/10 active:scale-[0.96]"
+                className="h-9 rounded-md border border-[var(--clr-orange)] px-5 text-sm font-semibold text-[var(--clr-orange)] transition-[background-color,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--clr-orange)]/10 hover:shadow-sm active:scale-[0.96]"
                 onClick={() => { setPreview(null); setSubmission(null); submitMutation.reset(); }}
               >
                 New bracket
@@ -369,7 +317,7 @@ export function BracketBuilderPanel({
               <>
                 <button
                   type="button"
-                  className="h-9 rounded-md bg-[var(--clr-green)] px-5 text-sm font-semibold text-[var(--bg-0)] transition-colors hover:opacity-90 active:scale-[0.96] disabled:opacity-50"
+                  className="h-9 rounded-md bg-[var(--clr-green)] px-5 text-sm font-semibold text-[var(--bg-0)] transition-[opacity,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:opacity-90 hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={submitMutation.isPending}
                   onClick={() => req && submitMutation.mutate(req)}
                 >
@@ -377,7 +325,7 @@ export function BracketBuilderPanel({
                 </button>
                 <button
                   type="button"
-                  className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-colors hover:bg-[var(--bg-0)] hover:text-[var(--text-1)]"
+                  className="h-9 rounded-md border border-border px-4 text-sm text-[var(--text-2)] transition-[background-color,color,box-shadow,transform] duration-150 ease-out enabled:cursor-pointer hover:bg-[var(--bg-0)] hover:text-[var(--text-1)] hover:shadow-sm active:scale-[0.96]"
                   onClick={() => setPreview(null)}
                 >
                   Edit bracket
@@ -391,252 +339,139 @@ export function BracketBuilderPanel({
   }
 
   return (
-    <div className={cn("flex h-full flex-col overflow-hidden rounded-lg border border-[#1f1b12] bg-[#05070d] text-slate-100 shadow-[0_18px_60px_rgba(0,0,0,0.35)]", !canDraft && "opacity-45")}>
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-        <div className="mb-4 text-[11px] font-black uppercase tracking-[0.28em] text-slate-400">
-          Order ticket
-        </div>
-
-        <section className="relative rounded-[18px] border border-cyan-500/35 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),rgba(8,13,20,0.96)_44%,rgba(5,7,13,1))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="relative max-w-sm">
-                <input
-                  className="h-14 w-full rounded-xl border border-transparent bg-transparent pr-12 text-[42px] font-black uppercase leading-none tracking-[-0.02em] text-slate-50 outline-none placeholder:text-slate-600 focus:border-cyan-400/35 focus:bg-black/20"
-                  placeholder="TSLA"
-                  value={symbol}
-                  disabled={!canDraft}
-                  onChange={(e) => handleSymbolChange(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && runSearch()}
+    <div className={cn("flex h-full flex-col", !canDraft && "opacity-45")}>
+      <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+        <FlowSheet mode="bracket">
+          <FlowRow id="bracket-symbol">
+            <FlowSymbolSearchRow
+              mode="bracket"
+              symbol={symbol}
+              placeholder="TSLA"
+              conid={conid}
+              companyName={selectedInstrument?.company_name}
+              exchange={selectedInstrument?.primary_exchange || selectedInstrument?.exchange}
+              currency={selectedInstrument?.currency}
+              disabled={!canDraft}
+              searchPending={searchMutation.isPending}
+              onSymbolChange={handleSymbolChange}
+              onSearch={runSearch}
+              searchResults={searchResults}
+              onResolve={resolveInstrument}
+            />
+          </FlowRow>
+          <FlowRow className="grid gap-4 md:grid-cols-2">
+            <div id="bracket-size">
+              <FlowField label="Side">
+                <FlowSegmented
+                  value={side}
+                  options={["BUY", "SELL"] as const}
+                  onChange={setSide}
+                  compact
                 />
-                <button
-                  type="button"
-                  className="absolute right-1 top-2.5 flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={!canDraft || !symbol || searchMutation.isPending}
-                  onClick={runSearch}
-                  tabIndex={-1}
-                >
-                  <Search className="h-5 w-5" strokeWidth={1.8} />
-                </button>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] font-semibold text-slate-400">
-                <span>{symbol || "Search symbol"}</span>
-                <span>/</span>
-                <span>SMART</span>
-                <span>/</span>
-                <span>USD</span>
-                <span>/</span>
-                <span>conid {conid || "resolve"}</span>
-              </div>
-              {searchResults.length > 1 && (
-                <ul className="absolute z-20 mt-3 w-[min(520px,calc(100%-2rem))] overflow-hidden rounded-xl border border-cyan-400/25 bg-[#070a11] shadow-2xl">
-                  {searchResults.map((r) => (
-                    <li key={r.conid}>
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[12px] text-slate-300 hover:bg-cyan-400/10"
-                        onClick={() => resolveInstrument(r)}
-                      >
-                        <span className="font-bold text-slate-100">{r.symbol}</span>
-                        <span className="truncate text-slate-500">
-                          {r.sec_type} / {r.primary_exchange || r.exchange} / {r.currency}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              </FlowField>
             </div>
-            <span className={cn(
-              "inline-flex shrink-0 rounded-full border px-4 py-2 text-[13px] font-black",
-              isLiveSession
-                ? "border-red-400/45 bg-red-500/12 text-red-300"
-                : connected
-                  ? "border-emerald-400/45 bg-emerald-500/12 text-emerald-300"
-                  : "border-orange-400/45 bg-orange-500/12 text-orange-300",
-            )}>
-              {ticketStatus}
-            </span>
-          </div>
-        </section>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <section className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <div className="mb-3 text-[12px] font-black text-slate-400">Side</div>
-            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.04] p-1">
-              {(["BUY", "SELL"] as ExecutionPlanSide[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={cn(
-                    "h-12 rounded-xl text-[14px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
-                    side === option
-                      ? option === "BUY"
-                        ? "bg-emerald-500/22 text-emerald-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                        : "bg-red-500/20 text-red-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                      : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300",
-                  )}
-                  disabled={!canDraft}
-                  onClick={() => setSide(option)}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <span className="mb-3 block text-[12px] font-black text-slate-400">Quantity</span>
-            <div className="flex items-baseline gap-2">
-              <input
+            <FlowField label="Quantity">
+              <FlowValueInput
                 type="number"
-                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
+                suffix="sh"
                 value={quantity}
                 disabled={!canDraft}
-                onChange={(e) => setQuantity(e.target.value)}
+                onChange={(event) => setQuantity(event.target.value)}
               />
-              <span className="font-data text-[30px] font-black text-slate-100">sh</span>
-            </div>
-          </label>
-        </div>
-
-        <section className="mt-3 rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-          <div className="mb-3 text-[12px] font-black text-slate-400">Entry type</div>
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.04] p-1">
-            {(["MKT", "LMT"] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                className={cn(
-                  "h-12 rounded-xl font-data text-[14px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
-                  orderType === type
-                    ? "bg-cyan-400/20 text-cyan-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                    : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300",
-                )}
-                disabled={!canDraft}
-                onClick={() => setOrderType(type)}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {orderType === "LMT" && (
-            <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-              <span className="mb-3 block text-[12px] font-black text-slate-400">Entry limit</span>
-              <div className="flex items-baseline">
-                <span className="font-data text-[30px] font-black text-slate-50">$</span>
-                <input
+            </FlowField>
+          </FlowRow>
+          <FlowRow id="bracket-entry" className="space-y-4">
+              <FlowField label="Entry type">
+                <FlowSegmented
+                  value={orderType}
+                  options={["MKT", "LMT"] as const}
+                  onChange={setOrderType}
+                  compact
+                />
+              </FlowField>
+            <div className="grid gap-4 md:grid-cols-2">
+              {orderType === "LMT" && (
+                <FlowField label="Entry limit">
+                  <FlowValueInput
+                    type="number"
+                    step="0.01"
+                    prefix="$"
+                    placeholder="0.00"
+                    value={limitPrice}
+                    disabled={!canDraft}
+                    onChange={(event) => setLimitPrice(event.target.value)}
+                  />
+                </FlowField>
+              )}
+              <FlowField label="Target">
+                <FlowValueInput
                   type="number"
                   step="0.01"
-                  className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
+                  prefix="$"
                   placeholder="0.00"
-                  value={limitPrice}
+                  value={targetPrice}
                   disabled={!canDraft}
-                  onChange={(e) => setLimitPrice(e.target.value)}
+                  onChange={(event) => setTargetPrice(event.target.value)}
                 />
+              </FlowField>
+            </div>
+            <div id="bracket-exit" className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+              <FlowField label="Protection">
+                <div className="space-y-2">
+                  <FlowSegmented
+                    value={useTrail ? "TRAIL" : "STOP"}
+                    options={["STOP", "TRAIL"] as const}
+                    onChange={(value) => setUseTrail(value === "TRAIL")}
+                    className="justify-center"
+                  />
+                  <p className="text-[10px] text-[var(--text-3)]">
+                    {useTrail ? "Trail follows price until it snaps back." : "Fixed stop stays at one price."}
+                  </p>
+                </div>
+              </FlowField>
+              <FlowField label={useTrail ? "Trail amount" : "Stop price"}>
+                <FlowValueInput
+                  type="number"
+                  step="0.01"
+                  prefix="$"
+                  placeholder="0.00"
+                  value={useTrail ? trailValue : stopPrice}
+                  disabled={!canDraft}
+                  onChange={(event) => useTrail ? setTrailValue(event.target.value) : setStopPrice(event.target.value)}
+                />
+              </FlowField>
+            </div>
+          </FlowRow>
+          <FlowRow>
+            <FlowGuidance>{guidance}</FlowGuidance>
+          </FlowRow>
+          {previewMutation.isError && (
+            <FlowRow>
+              <div className="space-y-1 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2">
+                {validationErrors(previewMutation.error).length > 0 ? (
+                  validationErrors(previewMutation.error).map((error, index) => (
+                    <p key={index} className="text-xs text-red-300">- {error}</p>
+                  ))
+                ) : (
+                  <p className="text-xs text-red-300">Preview failed — check inputs and TWS connection.</p>
+                )}
               </div>
-            </label>
+            </FlowRow>
           )}
-          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <span className="mb-3 block text-[12px] font-black text-slate-400">Target</span>
-            <div className="flex items-baseline">
-              <span className="font-data text-[30px] font-black text-slate-50">$</span>
-              <input
-                type="number"
-                step="0.01"
-                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
-                placeholder="0.00"
-                value={targetPrice}
-                disabled={!canDraft}
-                onChange={(e) => setTargetPrice(e.target.value)}
-              />
-            </div>
-          </label>
-          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <span className="mb-3 block text-[12px] font-black text-slate-400">{useTrail ? "Trail" : "Stop"}</span>
-            <div className="flex items-baseline">
-              <span className="font-data text-[30px] font-black text-slate-50">$</span>
-              <input
-                type="number"
-                step="0.01"
-                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
-                placeholder="0.00"
-                value={useTrail ? trailValue : stopPrice}
-                disabled={!canDraft}
-                onChange={(e) => useTrail ? setTrailValue(e.target.value) : setStopPrice(e.target.value)}
-              />
-            </div>
-          </label>
-          <section className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <div className="mb-3 flex items-center gap-1.5 text-[12px] font-black text-slate-400">
-              Trail <Hint text="A trailing stop follows the price up and triggers a sell if it falls back by this much." />
-            </div>
-            <button
-              type="button"
-              className={cn(
-                "h-12 w-full rounded-xl font-data text-[20px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
-                useTrail ? "bg-cyan-400/20 text-cyan-300" : "bg-white/[0.04] text-slate-100",
-              )}
-              disabled={!canDraft}
-              onClick={() => setUseTrail((v) => !v)}
-            >
-              {useTrail ? "ON" : "OFF"}
-            </button>
-          </section>
-        </div>
-
-        <div className="mt-3 rounded-[18px] border border-orange-400/25 bg-orange-500/[0.06] px-4 py-3 text-[13px] leading-6 text-slate-400">
-          <span className="font-black text-slate-100">Plain English:</span> {bracketPlainEnglish(side, symbol, orderType, useTrail)}
-        </div>
-
-        <div className="[--bg-0:#070a11] [--bg-1:#0c111a] [--text-1:#f8fafc] [--text-2:#cbd5e1] [--text-3:#7d8ba1] [--border:rgba(148,163,184,0.20)] mt-3">
-          <PlanAnatomyPanel
-            title="Bracket order logic"
-            subtitle="The chart shows the prices. This explains the sequence, links, and protection state."
-            badge={req ? "Ready to preview" : "Draft incomplete"}
-            steps={anatomySteps}
-            effects={anatomyEffects}
-          />
-        </div>
-
-        {previewMutation.isError && (
-          <div className="mt-3 space-y-1 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2">
-            {validationErrors(previewMutation.error).length > 0 ? (
-              validationErrors(previewMutation.error).map((e, i) => (
-                <p key={i} className="text-xs text-red-300">- {e}</p>
-              ))
-            ) : (
-              <p className="text-xs text-red-300">Preview failed — check inputs and TWS connection.</p>
-            )}
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-col gap-3 rounded-[18px] border border-orange-400/25 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Estimated notional</div>
-            <div className="mt-1 font-data text-[28px] font-black text-slate-50">
-              {estimatedNotional != null ? `$${estimatedNotional.toFixed(2)}` : "--"}
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 sm:items-end">
-            <button
-              type="button"
-              className="h-14 rounded-2xl bg-orange-400 px-7 text-[15px] font-black text-[#160d02] shadow-[0_12px_28px_rgba(251,146,60,0.22)] transition-transform hover:bg-orange-300 active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
-              disabled={!canDraft || !req || previewMutation.isPending}
-              onClick={() => req && previewMutation.mutate(req)}
-            >
-              {previewMutation.isPending ? "Previewing..." : "Preview bracket"}
-            </button>
-            {!req && (
-              <span className="max-w-[300px] text-right text-[12px] font-semibold text-slate-500">
-                Fill symbol, quantity, entry price, target, and a stop or trail.
-              </span>
-            )}
-          </div>
-        </div>
+          <FlowRow>
+            <FlowSummary notional={estimatedNotional != null ? `$${estimatedNotional.toFixed(2)}` : "--"}>
+              <div className="flex flex-col gap-2 sm:items-end">
+                <FlowActionButton
+                  mode="bracket"
+                  disabled={!canDraft || !req || previewMutation.isPending}
+                  onClick={() => req && previewMutation.mutate(req)}
+                >
+                  {previewMutation.isPending ? "Previewing..." : "Preview bracket"}
+                </FlowActionButton>
+              </div>
+            </FlowSummary>
+          </FlowRow>
+        </FlowSheet>
       </div>
     </div>
   );

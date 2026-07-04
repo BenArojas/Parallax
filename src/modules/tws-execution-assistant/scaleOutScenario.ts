@@ -1,10 +1,16 @@
-export type ScaleOutScenarioExitMode = "stops" | "close";
-
 export interface ScaleOutScenarioLot {
   quantity: number;
   targetPrice: number;
   stopPrice: number | null;
   trailAmount: number | null;
+}
+
+export type ScaleOutScenarioOutcome = "target" | "stop" | "fallback";
+
+export interface ScaleOutScenarioAssumption {
+  lotIndex: number;
+  outcome: ScaleOutScenarioOutcome;
+  fallbackPrice: number | null;
 }
 
 export interface ScaleOutScenarioResult {
@@ -33,57 +39,70 @@ function worstCaseFor(lots: ScaleOutScenarioLot[], entryPrice: number): number |
   return lots.reduce((sum, l, i) => sum + l.quantity * (exits[i]! - entryPrice), 0);
 }
 
-function targetGainFor(hitLots: ScaleOutScenarioLot[], entryPrice: number): number {
-  return hitLots.reduce(
-    (sum, l) => sum + (l.quantity && l.targetPrice ? l.quantity * (l.targetPrice - entryPrice) : 0),
-    0,
-  );
+function selectedExitPrice(
+  lot: ScaleOutScenarioLot,
+  entryPrice: number,
+  assumption: ScaleOutScenarioAssumption | undefined,
+): number | null {
+  const outcome = assumption?.outcome ?? "target";
+  if (outcome === "target") return lot.targetPrice || null;
+  if (outcome === "stop") return lotExitPrice(lot, entryPrice);
+  return assumption?.fallbackPrice ?? null;
 }
 
-function remainingExitFor(
-  remainingLots: ScaleOutScenarioLot[],
+function selectedResultFor(
+  lots: ScaleOutScenarioLot[],
   entryPrice: number,
-  exitMode: ScaleOutScenarioExitMode,
-  closePrice: number | null,
-): number | null {
-  if (remainingLots.length === 0) return 0;
-  if (!remainingLots.every((l) => l.quantity)) return null;
-
-  if (exitMode === "close") {
-    if (closePrice == null) return null;
-    return remainingLots.reduce((sum, l) => sum + l.quantity * (closePrice - entryPrice), 0);
+  assumptions: ScaleOutScenarioAssumption[],
+): Pick<ScaleOutScenarioResult, "selected" | "targetGain" | "remainingExit"> {
+  if (!lots.every((lot) => lot.quantity > 0)) {
+    return { selected: null, targetGain: 0, remainingExit: null };
   }
 
-  const exits = remainingLots.map((l) => lotExitPrice(l, entryPrice));
-  if (!exits.every((e) => e != null)) return null;
-  return remainingLots.reduce((sum, l, i) => sum + l.quantity * (exits[i]! - entryPrice), 0);
+  let targetGain = 0;
+  let remainingExit = 0;
+
+  for (let index = 0; index < lots.length; index += 1) {
+    const lot = lots[index];
+    const assumption = assumptions.find((item) => item.lotIndex === index);
+    const exitPrice = selectedExitPrice(lot, entryPrice, assumption);
+    if (exitPrice == null) {
+      return { selected: null, targetGain: 0, remainingExit: null };
+    }
+
+    const lotPnL = lot.quantity * (exitPrice - entryPrice);
+    if ((assumption?.outcome ?? "target") === "target") {
+      targetGain += lotPnL;
+    } else {
+      remainingExit += lotPnL;
+    }
+  }
+
+  return {
+    selected: targetGain + remainingExit,
+    targetGain,
+    remainingExit,
+  };
 }
 
 export function calculateScaleOutScenario(input: {
   entryPrice: number | null;
   lots: ScaleOutScenarioLot[];
-  targetsHit: number;
-  exitMode: ScaleOutScenarioExitMode;
-  closePrice: number | null;
+  assumptions: ScaleOutScenarioAssumption[];
 }): ScaleOutScenarioResult {
-  const { entryPrice, lots, targetsHit, exitMode, closePrice } = input;
+  const { entryPrice, lots, assumptions } = input;
 
   if (entryPrice == null || lots.length === 0) {
     return { bestCase: null, worstCase: null, selected: null, targetGain: 0, remainingExit: null };
   }
 
-  const hitCount = Math.max(0, Math.min(targetsHit, lots.length));
-  const hitLots = lots.slice(0, hitCount);
-  const remainingLots = lots.slice(hitCount);
-
-  const targetGain = targetGainFor(hitLots, entryPrice);
-  const remainingExit = remainingExitFor(remainingLots, entryPrice, exitMode, closePrice);
+  const selected = selectedResultFor(lots, entryPrice, assumptions);
 
   return {
     bestCase: bestCaseFor(lots, entryPrice),
     worstCase: worstCaseFor(lots, entryPrice),
-    selected: remainingExit == null ? null : targetGain + remainingExit,
-    targetGain,
-    remainingExit,
+    selected: selected.selected,
+    targetGain: selected.targetGain,
+    remainingExit: selected.remainingExit,
   };
 }
