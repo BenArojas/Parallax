@@ -63,6 +63,15 @@ function standardPriceRequirement(fields: ReturnType<typeof priceFieldsFor>): st
   return "No price required";
 }
 
+function standardPlainEnglish(plan: ExecutionPlanDraftRequest): string {
+  const action = plan.side === "BUY" ? "Buy" : "Sell";
+  const symbol = plan.symbol || "symbol";
+  if (plan.order_type === "MKT") return `${action} ${symbol} at the market after review.`;
+  if (plan.order_type === "LMT") return `${action} ${symbol} only at your limit price or better.`;
+  if (plan.order_type === "STP") return `${action} ${symbol} after the stop trigger is reached.`;
+  return `${action} ${symbol} with a stop trigger, then use your limit price once it activates.`;
+}
+
 
 /** IBKR returns -1 for fields that have no data (unset sentinel). */
 function ibkrVal(v: number | null): number | null {
@@ -1007,6 +1016,16 @@ export function TwsExecutionAssistantModule() {
       tone: standardDraftReason == null ? "green" : "orange",
     },
   ];
+  const standardEstimatedNotional =
+    planForm.limit_price != null && planForm.limit_price > 0 && planForm.quantity > 0
+      ? planForm.quantity * planForm.limit_price
+      : null;
+  const standardTicketStatus = isLiveSession
+    ? livePolicy?.armed ? "Live armed" : "Live locked"
+    : connected ? "Paper connected" : "Disconnected";
+  const standardTicketStatusTone = isLiveSession
+    ? livePolicy?.armed ? "red" : "orange"
+    : connected ? "green" : "orange";
   const summary = recon ?? status?.reconciliation_summary;
 
   return (
@@ -1180,10 +1199,10 @@ export function TwsExecutionAssistantModule() {
           </div>
         )}
 
-        <div className="grid h-[480px] shrink-0 gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="grid h-[clamp(560px,calc(100vh-130px),720px)] shrink-0 gap-1.5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <Panel
             title="Execution Plan"
-            className="h-[480px]"
+            className="h-full"
             accent={planMode === "scale_out" ? "purple" : planMode === "bracket" ? "orange" : planMode === "advanced" ? "blue" : "cyan"}
             sweep={sweeping}
             headerRight={
@@ -1720,192 +1739,239 @@ export function TwsExecutionAssistantModule() {
                   onReviewLocked={handlePanelReviewLocked}
                 />
               ) : (
-                <div className="relative flex h-full flex-col">
-                  <div className={cn("flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pb-2", !canDraft && "opacity-45")}>
-                    {/* Row 1: Symbol (hero) · ConID · Side */}
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-medium text-[var(--text-2)]">Symbol</span>
-                        <div className="relative">
-                          <input
-                            className="h-11 w-full rounded border border-border bg-[var(--bg-0)] px-3 pr-9 text-sm font-semibold uppercase outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                            placeholder="e.g. NVDA"
-                            value={planForm.symbol}
-                            disabled={!canDraft}
-                            onChange={(e) => handleSymbolChange(e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && runSearch()}
-                          />
-                          <button
-                            type="button"
-                            className="absolute right-2.5 top-3 text-[var(--text-3)] hover:text-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                            disabled={!canDraft || !planForm.symbol || searchMutation.isPending}
-                            onClick={runSearch}
-                            tabIndex={-1}
-                          >
-                            <Search className="h-4 w-4" strokeWidth={1.7} />
-                          </button>
-                        </div>
-                        {searchResults.length > 1 && (
-                          <ul className="mt-0.5 rounded border border-border bg-[var(--bg-0)] shadow-md">
-                            {searchResults.map((r) => (
-                              <li key={r.conid}>
-                                <button
-                                  type="button"
-                                  className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-[var(--bg-1)]"
-                                  onClick={() => {
-                                    setPlanForm((f) => ({ ...f, conid: r.conid, limit_price: null, stop_price: null }));
-                                    setSelectedExchange(r.primary_exchange || r.exchange);
-                                    setSelectedCompanyName(r.company_name);
-                                    setSearchResults([]);
-                                  }}
-                                >
-                                  <span className="font-medium">{r.symbol}</span>
-                                  <span className="text-[var(--text-3)]">
-                                    {r.sec_type} · {r.primary_exchange || r.exchange} · {r.currency}
-                                  </span>
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-medium text-[var(--text-2)]">ConID</span>
-                        <input
-                          type="number"
-                          className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                          placeholder="Search symbol to resolve"
-                          value={planForm.conid || ""}
-                          disabled={!canDraft}
-                          onChange={(e) => setPlanForm((f) => ({ ...f, conid: Number(e.target.value) }))}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-medium text-[var(--text-2)]">Side</span>
-                        <select
-                          className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                          value={planForm.side}
-                          disabled={!canDraft}
-                          onChange={(e) => setPlanForm((f) => ({ ...f, side: e.target.value as ExecutionPlanSide }))}
-                        >
-                          <option value="BUY">BUY</option>
-                          <option value="SELL">SELL</option>
-                        </select>
-                      </label>
+                <div className="relative flex h-full flex-col overflow-hidden rounded-lg border border-[#162331] bg-[#05070d] text-slate-100 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+                  <div className={cn("flex-1 min-h-0 overflow-y-auto px-5 py-4", !canDraft && "opacity-45")}>
+                    <div className="mb-4 text-[11px] font-black uppercase tracking-[0.28em] text-slate-400">
+                      Order ticket
                     </div>
 
-                    {/* Row 2: Quantity · Order type · Limit price (hero) */}
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-medium text-[var(--text-2)]">Quantity</span>
-                        <input
-                          type="number"
-                          className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                          value={planForm.quantity}
-                          disabled={!canDraft}
-                          onChange={(e) => setPlanForm((f) => ({ ...f, quantity: Number(e.target.value) }))}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-medium text-[var(--text-2)]">Order type</span>
-                        <select
-                          className="h-9 w-full rounded border border-border bg-[var(--bg-0)] px-3 text-sm outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                          value={planForm.order_type}
-                          disabled={!canDraft}
-                          onChange={(e) => setPlanForm((f) => ({ ...f, order_type: e.target.value as ExecutionPlanOrderType, limit_price: null, stop_price: null }))}
-                        >
-                          {(Object.keys(TWS_ORDER_CAPABILITIES) as ExecutionPlanOrderType[]).map((t) => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
-                      </label>
-                      {priceFieldsFor(planForm.order_type).includes("stop_price") && (
-                        <label className="space-y-1.5">
-                          <span className="text-xs font-medium text-[var(--text-2)]">Stop trigger</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="h-11 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm font-semibold outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                            placeholder="0.00"
-                            value={planForm.stop_price ?? ""}
-                            disabled={!canDraft}
-                            onChange={(e) => setPlanForm((f) => ({ ...f, stop_price: Number(e.target.value) || null }))}
-                          />
-                        </label>
-                      )}
-                      {priceFieldsFor(planForm.order_type).includes("limit_price") && (
-                        <label className="space-y-1.5">
-                          <span className="text-xs font-medium text-[var(--text-2)]">Limit price</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="h-11 w-full rounded border border-border bg-[var(--bg-0)] px-3 font-data text-sm font-semibold outline-none transition-colors focus:border-[var(--clr-cyan)] disabled:cursor-not-allowed"
-                            placeholder="0.00"
-                            value={planForm.limit_price ?? ""}
-                            disabled={!canDraft}
-                            onChange={(e) => setPlanForm((f) => ({ ...f, limit_price: Number(e.target.value) || null }))}
-                          />
-                        </label>
-                      )}
-                    </div>
-
-                    <PlanAnatomyPanel
-                      title="Standard order logic"
-                      subtitle="The chart shows any price lines. This explains the single broker order and review gate."
-                      badge={standardDraftReason == null ? "Ready to review" : "Draft incomplete"}
-                      steps={standardAnatomySteps}
-                      effects={standardAnatomyEffects}
-                    />
-
-                    {/* Notional value */}
-                    {planForm.limit_price != null && planForm.limit_price > 0 && planForm.quantity > 0 && (
-                      <div className="flex items-center justify-between rounded border border-border/50 bg-[var(--bg-0)] px-4 py-3">
-                        <span className="text-xs text-[var(--text-3)]">
-                          {planForm.quantity} × {planForm.limit_price.toFixed(2)}
-                        </span>
-                        <div className="text-right">
-                          <div className="text-[10px] uppercase tracking-wider text-[var(--text-3)]">Notional</div>
-                          <div className="font-data text-base font-semibold text-[var(--text-1)]">
-                            ${(planForm.quantity * planForm.limit_price).toFixed(2)}
+                    <section className="relative rounded-[18px] border border-cyan-500/35 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),rgba(8,13,20,0.96)_44%,rgba(5,7,13,1))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="relative max-w-sm">
+                            <input
+                              className="h-14 w-full rounded-xl border border-transparent bg-transparent pr-12 text-[42px] font-black uppercase leading-none tracking-[-0.02em] text-slate-50 outline-none placeholder:text-slate-600 focus:border-cyan-400/35 focus:bg-black/20"
+                              placeholder="TSLA"
+                              value={planForm.symbol}
+                              disabled={!canDraft}
+                              onChange={(e) => handleSymbolChange(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                            />
+                            <button
+                              type="button"
+                              className="absolute right-1 top-2.5 flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-45"
+                              disabled={!canDraft || !planForm.symbol || searchMutation.isPending}
+                              onClick={runSearch}
+                              tabIndex={-1}
+                            >
+                              <Search className="h-5 w-5" strokeWidth={1.8} />
+                            </button>
                           </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] font-semibold text-slate-400">
+                            <span>{selectedCompanyName || (planForm.symbol ? planForm.symbol : "Search symbol")}</span>
+                            <span>/</span>
+                            <span>{selectedExchange || "SMART"}</span>
+                            <span>/</span>
+                            <span>USD</span>
+                            <span>/</span>
+                            <label className="flex items-center gap-1">
+                              <span>conid</span>
+                              <input
+                                type="number"
+                                className="h-6 w-24 rounded border border-white/10 bg-black/20 px-1.5 font-data text-[12px] text-slate-300 outline-none focus:border-cyan-400/45 disabled:cursor-not-allowed"
+                                placeholder="resolve"
+                                value={planForm.conid || ""}
+                                disabled={!canDraft}
+                                onChange={(e) => setPlanForm((f) => ({ ...f, conid: Number(e.target.value) }))}
+                              />
+                            </label>
+                          </div>
+                          {searchResults.length > 1 && (
+                            <ul className="absolute z-20 mt-3 w-[min(520px,calc(100%-2rem))] overflow-hidden rounded-xl border border-cyan-400/25 bg-[#070a11] shadow-2xl">
+                              {searchResults.map((r) => (
+                                <li key={r.conid}>
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[12px] text-slate-300 hover:bg-cyan-400/10"
+                                    onClick={() => {
+                                      setPlanForm((f) => ({ ...f, conid: r.conid, limit_price: null, stop_price: null }));
+                                      setSelectedExchange(r.primary_exchange || r.exchange);
+                                      setSelectedCompanyName(r.company_name);
+                                      setSearchResults([]);
+                                    }}
+                                  >
+                                    <span className="font-bold text-slate-100">{r.symbol}</span>
+                                    <span className="truncate text-slate-500">
+                                      {r.sec_type} / {r.primary_exchange || r.exchange} / {r.currency}
+                                    </span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                         </div>
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 rounded-full border px-4 py-2 text-[13px] font-black",
+                            standardTicketStatusTone === "green" && "border-emerald-400/45 bg-emerald-500/12 text-emerald-300",
+                            standardTicketStatusTone === "orange" && "border-orange-400/45 bg-orange-500/12 text-orange-300",
+                            standardTicketStatusTone === "red" && "border-red-400/45 bg-red-500/12 text-red-300",
+                          )}
+                        >
+                          {standardTicketStatus}
+                        </span>
+                      </div>
+                    </section>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <section className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                        <div className="mb-3 text-[12px] font-black text-slate-400">Side</div>
+                        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.04] p-1">
+                          {(["BUY", "SELL"] as ExecutionPlanSide[]).map((side) => (
+                            <button
+                              key={side}
+                              type="button"
+                              className={cn(
+                                "h-12 rounded-xl text-[14px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
+                                planForm.side === side
+                                  ? side === "BUY"
+                                    ? "bg-emerald-500/22 text-emerald-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                                    : "bg-red-500/20 text-red-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                                  : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300",
+                              )}
+                              disabled={!canDraft}
+                              onClick={() => setPlanForm((f) => ({ ...f, side }))}
+                            >
+                              {side}
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+
+                      <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                        <span className="mb-3 block text-[12px] font-black text-slate-400">Quantity</span>
+                        <div className="flex items-baseline gap-2">
+                          <input
+                            type="number"
+                            className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
+                            value={planForm.quantity}
+                            disabled={!canDraft}
+                            onChange={(e) => setPlanForm((f) => ({ ...f, quantity: Number(e.target.value) }))}
+                          />
+                          <span className="font-data text-[30px] font-black text-slate-100">sh</span>
+                        </div>
+                      </label>
+                    </div>
+
+                    <section className="mt-3 rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                      <div className="mb-3 text-[12px] font-black text-slate-400">Order type</div>
+                      <div className="grid gap-2 rounded-2xl bg-white/[0.04] p-1 sm:grid-cols-4">
+                        {(Object.keys(TWS_ORDER_CAPABILITIES) as ExecutionPlanOrderType[]).map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            className={cn(
+                              "h-12 rounded-xl font-data text-[14px] font-black transition-transform active:scale-[0.96] disabled:cursor-not-allowed",
+                              planForm.order_type === type
+                                ? "bg-cyan-400/20 text-cyan-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                                : "text-slate-500 hover:bg-white/[0.04] hover:text-slate-300",
+                            )}
+                            disabled={!canDraft}
+                            onClick={() => setPlanForm((f) => ({ ...f, order_type: type, limit_price: null, stop_price: null }))}
+                          >
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    {standardPriceFields.length > 0 && (
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {standardPriceFields.includes("limit_price") && (
+                          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                            <span className="mb-3 block text-[12px] font-black text-slate-400">Limit price</span>
+                            <div className="flex items-baseline">
+                              <span className="font-data text-[30px] font-black text-slate-50">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
+                                placeholder="0.00"
+                                value={planForm.limit_price ?? ""}
+                                disabled={!canDraft}
+                                onChange={(e) => setPlanForm((f) => ({ ...f, limit_price: Number(e.target.value) || null }))}
+                              />
+                            </div>
+                          </label>
+                        )}
+                        {standardPriceFields.includes("stop_price") && (
+                          <label className="rounded-[18px] border border-white/10 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                            <span className="mb-3 block text-[12px] font-black text-slate-400">Stop trigger</span>
+                            <div className="flex items-baseline">
+                              <span className="font-data text-[30px] font-black text-slate-50">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="min-w-0 flex-1 bg-transparent font-data text-[34px] font-black leading-none text-slate-50 outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
+                                placeholder="0.00"
+                                value={planForm.stop_price ?? ""}
+                                disabled={!canDraft}
+                                onChange={(e) => setPlanForm((f) => ({ ...f, stop_price: Number(e.target.value) || null }))}
+                              />
+                            </div>
+                          </label>
+                        )}
                       </div>
                     )}
 
-                  </div>
+                    <div className="mt-3 rounded-[18px] border border-orange-400/25 bg-orange-500/[0.06] px-4 py-3 text-[13px] leading-6 text-slate-400">
+                      <span className="font-black text-slate-100">Plain English:</span> {standardPlainEnglish(planForm)}
+                    </div>
 
-                  {/* Bottom: errors + action — always visible */}
-                  <div className="shrink-0 flex flex-col gap-3 pt-2">
-                    {currentPlan?.status === "invalid" && currentPlan.validation_errors.length > 0 && (
-                      <ul className="space-y-1">
+                    <div className="[--bg-0:#070a11] [--bg-1:#0c111a] [--text-1:#f8fafc] [--text-2:#cbd5e1] [--text-3:#7d8ba1] [--border:rgba(148,163,184,0.20)] mt-3">
+                      <PlanAnatomyPanel
+                        title="Standard order logic"
+                        subtitle="The chart shows any price lines. This explains the single broker order and review gate."
+                        badge={standardDraftReason == null ? "Ready to review" : "Draft incomplete"}
+                        steps={standardAnatomySteps}
+                        effects={standardAnatomyEffects}
+                      />
+                    </div>
+
+                    {(currentPlan?.status === "invalid" && currentPlan.validation_errors.length > 0) && (
+                      <ul className="mt-3 space-y-1 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2">
                         {currentPlan.validation_errors.map((e, i) => (
-                          <li key={i} className="text-xs text-[var(--clr-red)]">- {e}</li>
+                          <li key={i} className="text-xs text-red-300">- {e}</li>
                         ))}
                       </ul>
                     )}
                     {reviewMutation.isError && currentPlan?.status !== "invalid" && (
-                      <p className="text-xs text-[var(--clr-red)]">
+                      <p className="mt-3 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
                         {SUBMIT_ERROR_MESSAGES[submitErrorCode(reviewMutation.error) ?? ""] ??
                           "Review failed — check that TWS is connected and on a paper port."}
                       </p>
                     )}
-                    {(() => {
-                      const reason = saveDraftDisabledReason();
-                      return (
-                        <div className="flex items-center gap-3">
-                          <button
-                            className="h-9 rounded-md border border-[var(--clr-cyan)] px-4 text-sm font-semibold text-[var(--clr-cyan)] transition-colors hover:bg-[var(--clr-cyan)]/10 active:scale-[0.96] disabled:opacity-50"
-                            disabled={!canDraft || reviewMutation.isPending || reason != null}
-                            onClick={() => { placeOrderMutation.reset(); reviewMutation.mutate(planForm); }}
-                          >
-                            {reviewMutation.isPending ? "Reviewing..." : "Review order"}
-                          </button>
-                          {canDraft && reason != null && (
-                            <span className="text-xs text-[var(--text-3)]">{reason}</span>
-                          )}
+
+                    <div className="mt-4 flex flex-col gap-3 rounded-[18px] border border-orange-400/25 bg-black/28 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Estimated notional</div>
+                        <div className="mt-1 font-data text-[28px] font-black text-slate-50">
+                          {standardEstimatedNotional != null ? `$${standardEstimatedNotional.toFixed(2)}` : "--"}
                         </div>
-                      );
-                    })()}
+                      </div>
+                      <div className="flex flex-col gap-2 sm:items-end">
+                        <button
+                          className="h-14 rounded-2xl bg-cyan-400 px-7 text-[15px] font-black text-[#031018] shadow-[0_12px_28px_rgba(34,211,238,0.22)] transition-transform hover:bg-cyan-300 active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500 disabled:shadow-none"
+                          disabled={!canDraft || reviewMutation.isPending || standardDraftReason != null}
+                          onClick={() => { placeOrderMutation.reset(); reviewMutation.mutate(planForm); }}
+                        >
+                          {reviewMutation.isPending ? "Reviewing..." : "Review order"}
+                        </button>
+                        {canDraft && standardDraftReason != null && (
+                          <span className="max-w-[260px] text-right text-[12px] font-semibold text-slate-500">{standardDraftReason}</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {!canDraft && (
@@ -1926,7 +1992,7 @@ export function TwsExecutionAssistantModule() {
                 </div>
               )}
             </Panel>
-          <aside className="h-[480px]">
+          <aside className="h-full">
             <section className="flex h-full min-w-0 flex-col rounded-md border border-border bg-[var(--bg-1)] shadow-sm">
               <div className="shrink-0 border-b border-border px-3 py-2">
                 <div className="flex items-center gap-2">
