@@ -11,7 +11,7 @@ from datetime import date as date_, datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
 from fastapi import WebSocket
-from ib_async import IB, Contract, Order, PnL, PnLSingle, PriceCondition
+from ib_async import IB, Contract, Fill, Order, PnL, PnLSingle, PriceCondition, Trade
 from starlette.websockets import WebSocketState
 
 from models.broker_session import BrokerSessionMode
@@ -38,6 +38,7 @@ from models.tws_execution_assistant import (
     TwsBarUpdateEvent,
     TwsDepthLevel,
     TwsDepthUpdateEvent,
+    TwsFillEvent,
     TwsModifyOrderRequest,
     TwsOrderActionResult,
     TwsOrderPackageLegSubmission,
@@ -206,13 +207,31 @@ class TwsBrokerAdapter:
                 return
             self._recon_changed_task = loop.create_task(self._debounced_recon_broadcast())
 
+        def _on_exec_details(trade: Trade, fill: Fill) -> None:
+            side = "BUY" if fill.execution.side == "BOT" else "SELL"
+            event = TwsFillEvent(
+                conid=fill.contract.conId,
+                symbol=fill.contract.symbol,
+                side=side,
+                quantity=fill.execution.shares,
+                price=fill.execution.price,
+                order_ref=trade.order.orderRef or None,
+            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(self._broadcast_fill(event))
+
         self._stream_connected_handler = _on_connected
         self._stream_disconnected_handler = _on_disconnected
         self._recon_changed_handler = _on_recon_changed
+        self._exec_details_handler = _on_exec_details
         self._ib.connectedEvent += self._stream_connected_handler
         self._ib.disconnectedEvent += self._stream_disconnected_handler
         self._ib.orderStatusEvent += self._recon_changed_handler
         self._ib.execDetailsEvent += self._recon_changed_handler
+        self._ib.execDetailsEvent += self._exec_details_handler
         self._ib.positionEvent += self._recon_changed_handler
         # openOrderEvent covers modifies made in the TWS UI itself — those
         # update the order in place without a field-changed orderStatus.
@@ -696,6 +715,20 @@ class TwsBrokerAdapter:
                 continue
             try:
                 await websocket.send_json(event)
+            except RuntimeError:
+                dead.append(websocket)
+        for websocket in dead:
+            self.stream_cleanup(websocket)
+
+    async def _broadcast_fill(self, event: TwsFillEvent) -> None:
+        payload = event.model_dump()
+        dead: list[WebSocket] = []
+        for websocket in list(self._stream_subscriptions):
+            if not self.stream_socket_is_open(websocket):
+                dead.append(websocket)
+                continue
+            try:
+                await websocket.send_json(payload)
             except RuntimeError:
                 dead.append(websocket)
         for websocket in dead:

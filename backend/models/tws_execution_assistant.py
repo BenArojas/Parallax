@@ -214,6 +214,16 @@ class TwsReconChangedEvent(BaseModel):
     type: Literal["tws_recon_changed"] = "tws_recon_changed"
 
 
+class TwsFillEvent(BaseModel):
+    type: Literal["tws_fill"] = "tws_fill"
+    conid: int
+    symbol: str
+    side: str
+    quantity: float
+    price: float
+    order_ref: str | None = None
+
+
 class TwsQuoteStreamEvent(BaseModel):
     type: Literal["tws_quote"] = "tws_quote"
     conid: int

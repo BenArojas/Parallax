@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { CheckCircle2, LockKeyhole, Power } from "lucide-react";
 import { BackToOrbitButton } from "@/components/ui/BackToOrbitButton";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { BROKER_SESSION_KEY } from "@/context/BrokerSessionContext";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/sidecarClient";
-import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type PositionSnapshot, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsFlattenResult, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
+import { twsApi, TWS_CONNECT_DEFAULTS, TWS_TIMEFRAMES, type ExecutionPlan, type ExecutionPlanDraftRequest, type ExecutionPlanOrderType, type InstrumentResult, type OrderSnapshot, type PaperOrderPreview, type PaperOrderSubmission, type PositionSnapshot, type QuoteSnapshot, type ReconciliationSnapshot, type TwsAdvancedReject, type TwsConnectRequest, type TwsFillEvent, type TwsFlattenResult, type TwsLiveAllowlistRequest, type TwsModifyOrderRequest, type TwsTimeframe } from "./api";
 import { TWS_ORDER_CAPABILITIES, canModifyOrderType, priceFieldsFor, type TwsOrderType } from "./orderCapabilities";
 import { OrderRow } from "./OrderRow";
 import { ScaleOutLadderPanel } from "./ScaleOutLadderPanel";
@@ -570,6 +571,14 @@ export function TwsExecutionAssistantModule() {
   // (see backend TwsReconChangedEvent). Polling above is now just a fallback.
   useEffect(() => {
     return addHandler((msg) => {
+      if (msg.type === "tws_fill") {
+        const fill = msg as unknown as TwsFillEvent;
+        const role = fill.order_ref?.startsWith("ORBIT:TWS:FLATTEN:")
+          ? "flatten"
+          : (parseScaleOutOrderRef(fill.order_ref)?.roleType ?? parseBracketOrderRef(fill.order_ref)?.roleType);
+        toast(`${fill.symbol} · ${fill.side} ${fill.quantity} @ ${fill.price.toFixed(2)}${role ? ` · ${role}` : ""}`);
+        return;
+      }
       if (msg.type !== "tws_recon_changed") return;
       queryClient.invalidateQueries({ queryKey: RECON_KEY });
       queryClient.invalidateQueries({ queryKey: STATUS_KEY });

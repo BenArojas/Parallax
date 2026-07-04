@@ -216,6 +216,16 @@ export interface QuoteSnapshot {
   error_code: number | null;
 }
 
+export interface TwsFillEvent {
+  type: "tws_fill";
+  conid: number;
+  symbol: string;
+  side: string;
+  quantity: number;
+  price: number;
+  order_ref: string | null;
+}
+
 export interface TwsQuoteStreamEvent {
   type: "tws_quote";
   conid: number;
