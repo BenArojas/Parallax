@@ -322,7 +322,15 @@ function positionProtection(position: PositionSnapshot, openOrders: OrderSnapsho
 } {
   const exitSide = position.position > 0 ? "SELL" : "BUY";
   const needed = Math.abs(position.position);
-  const exits = openOrders.filter((o) => o.conid === position.conid && o.side === exitSide);
+  // A child whose parent is still open is held by IB, inactive until the
+  // parent fills — bracket exits for a *pending* entry protect nothing yet.
+  const openIds = new Set(openOrders.map((o) => o.order_id));
+  const exits = openOrders.filter(
+    (o) =>
+      o.conid === position.conid &&
+      o.side === exitSide &&
+      (o.parent_id == null || !openIds.has(o.parent_id)),
+  );
   const ocaMax = new Map<string, number>();
   let covered = 0;
   for (const o of exits) {
@@ -1965,8 +1973,9 @@ export function TwsExecutionAssistantModule() {
                     return (
                       <tr
                         key={p.conid}
-                        onClick={() => pointChartAt(p.conid, p.symbol)}
-                        className="cursor-pointer border-t border-border hover:bg-[var(--bg-1)]"
+                        onClick={() => { if (!reviewLocked) pointChartAt(p.conid, p.symbol); }}
+                        className={`border-t border-border ${reviewLocked ? "" : "cursor-pointer hover:bg-[var(--bg-1)]"}`}
+                        title={reviewLocked ? "Finish or cancel the current review to switch the chart" : undefined}
                       >
                         <td className="py-1.5 pr-4 font-medium">{p.symbol}</td>
                         <td className={`pr-4 font-data ${p.position < 0 ? "text-[var(--clr-red)]" : ""}`}>
@@ -1986,7 +1995,7 @@ export function TwsExecutionAssistantModule() {
                           {unrlPct != null ? `${unrlPct.toFixed(1)}%` : "—"}
                         </td>
                         <td className="font-data">
-                          {covered === 0 ? (
+                          {covered === 0 || needed === 0 ? (
                             <span className="text-[var(--text-3)]">—</span>
                           ) : covered < needed ? (
                             <span className="text-[var(--clr-orange)]">⚠ {needed - covered} unprot.</span>

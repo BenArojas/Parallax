@@ -141,8 +141,9 @@ def _lmt_price(val: float) -> float | None:
 
 
 def _nan_to_none(v: float) -> float | None:
-    """ib_async reports unset portfolio/PnL floats as nan."""
-    return None if v is None or math.isnan(v) else v
+    """ib_async reports unset portfolio/PnL floats as nan — or as IB's
+    DBL_MAX sentinel, same as the quote fields _quote_val guards."""
+    return None if v is None or math.isnan(v) or abs(v) >= _IBKR_UNSET else v
 
 
 def _order_stop_price(order: Order) -> float | None:
@@ -212,6 +213,9 @@ class TwsBrokerAdapter:
         self._ib.orderStatusEvent += self._recon_changed_handler
         self._ib.execDetailsEvent += self._recon_changed_handler
         self._ib.positionEvent += self._recon_changed_handler
+        # openOrderEvent covers modifies made in the TWS UI itself — those
+        # update the order in place without a field-changed orderStatus.
+        self._ib.openOrderEvent += self._recon_changed_handler
 
     async def connect(self, host: str, port: int, client_id: int) -> None:
         # KNOWN GAP: no paper/live account-type check here. Paper is the default
@@ -898,14 +902,16 @@ class TwsBrokerAdapter:
         # Daily P&L: lazy sync-on-recon against reqPnLSingle subscriptions, no
         # dedicated event lifecycle. First read after subscribing is None until
         # the ~1s-later async update lands; the next recon fills it in.
-        accounts = self._ib.managedAccounts()
-        if accounts:
-            account = accounts[0]
-            for conid in held_conids - self._pnl_singles.keys():
-                self._pnl_singles[conid] = self._ib.reqPnLSingle(account, "", conid)
-            for conid in self._pnl_singles.keys() - held_conids:
-                self._ib.cancelPnLSingle(account, "", conid)
-                self._pnl_singles.pop(conid, None)
+        # ponytail: keyed by conid only — a conid held in two managed accounts
+        # collapses to one row/subscription. Single-account logins are the
+        # supported case; portfolio() enrichment and the day-P&L strip likewise
+        # cover the default account only.
+        account_by_conid = {p.contract.conId: p.account for p in raw_positions}
+        for conid in held_conids - self._pnl_singles.keys():
+            self._pnl_singles[conid] = self._ib.reqPnLSingle(account_by_conid[conid], "", conid)
+        for conid in self._pnl_singles.keys() - held_conids:
+            stale = self._pnl_singles.pop(conid)
+            self._ib.cancelPnLSingle(stale.account, "", conid)
 
         positions = []
         for p in raw_positions:
