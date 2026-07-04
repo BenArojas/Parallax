@@ -1056,13 +1056,16 @@ export function TwsExecutionAssistantModule() {
       ? `risk $${Number(standardRiskDollars).toFixed(2)} / ${standardRiskPerShare.toFixed(2)} per share → ${Math.floor(Number(standardRiskDollars) / standardRiskPerShare)}`
       : null;
 
-  function handleStandardRiskDollarsChange(value: string) {
-    setStandardRiskDollars(value);
-    const risk = Number(value);
+  // Keep quantity in sync while a risk figure is active — not just on the risk
+  // keystroke. Dragging the stop line changes risk-per-share, and a size that
+  // no longer matches the stop would defeat the whole point of risk sizing.
+  // Manual quantity edits clear standardRiskDollars, which disarms this.
+  useEffect(() => {
+    const risk = Number(standardRiskDollars);
     if (!(risk > 0) || standardRiskPerShare == null || standardRiskPerShare === 0) return;
     const qty = Math.max(0, Math.floor(risk / standardRiskPerShare));
-    setPlanForm((form) => ({ ...form, quantity: qty }));
-  }
+    setPlanForm((form) => (form.quantity === qty ? form : { ...form, quantity: qty }));
+  }, [standardRiskDollars, standardRiskPerShare]);
 
   function handleStandardQuantityChange(value: number) {
     setPlanForm((form) => ({ ...form, quantity: value }));
@@ -1865,7 +1868,7 @@ export function TwsExecutionAssistantModule() {
                             value={standardRiskDollars}
                             disabled={!canDraft || standardRiskSizingDisabledReason != null}
                             title={standardRiskSizingDisabledReason ?? undefined}
-                            onChange={(event) => handleStandardRiskDollarsChange(event.target.value)}
+                            onChange={(event) => setStandardRiskDollars(event.target.value)}
                           />
                           {standardRiskHint && <p className="mt-1 text-[10px] text-[var(--text-3)]">{standardRiskHint}</p>}
                         </FlowField>

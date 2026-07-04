@@ -235,7 +235,7 @@ export function ManagePositionPanel({
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             <button
               type="button"
-              disabled={reviewLocked || freeQty === 0}
+              disabled={reviewLocked || thirdQty < 1}
               title={freeQty === 0 ? "All shares covered by working exits — manage or cancel them first" : undefined}
               className="h-6 rounded border border-border px-2 text-[10px] text-[var(--text-2)] hover:bg-[var(--bg-1)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={() => onPrefillTicket(exitSide, thirdQty)}
@@ -244,7 +244,7 @@ export function ManagePositionPanel({
             </button>
             <button
               type="button"
-              disabled={reviewLocked || freeQty === 0}
+              disabled={reviewLocked || halfQty < 1}
               title={freeQty === 0 ? "All shares covered by working exits — manage or cancel them first" : undefined}
               className="h-6 rounded border border-border px-2 text-[10px] text-[var(--text-2)] hover:bg-[var(--bg-1)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={() => onPrefillTicket(exitSide, halfQty)}

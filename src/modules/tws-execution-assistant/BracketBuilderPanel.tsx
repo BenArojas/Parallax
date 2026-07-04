@@ -255,12 +255,15 @@ export function BracketBuilderPanel({
       ? `risk $${Number(riskDollars).toFixed(2)} / ${riskPerShare.toFixed(2)} per share → ${Math.floor(Number(riskDollars) / riskPerShare)}`
       : null;
 
-  function handleRiskDollarsChange(value: string) {
-    setRiskDollars(value);
-    const risk = Number(value);
+  // Keep quantity synced while a risk figure is active — editing the limit or
+  // stop after entering risk changes risk-per-share, and a stale size would no
+  // longer match the stop. Manual quantity edits clear riskDollars, disarming
+  // this.
+  useEffect(() => {
+    const risk = Number(riskDollars);
     if (!(risk > 0) || riskPerShare == null || riskPerShare === 0) return;
     setQuantity(String(Math.max(0, Math.floor(risk / riskPerShare))));
-  }
+  }, [riskDollars, riskPerShare]);
 
   function handleQuantityChange(value: string) {
     setQuantity(value);
@@ -416,7 +419,7 @@ export function BracketBuilderPanel({
                 value={riskDollars}
                 disabled={!canDraft || riskSizingDisabledReason != null}
                 title={riskSizingDisabledReason ?? undefined}
-                onChange={(event) => handleRiskDollarsChange(event.target.value)}
+                onChange={(event) => setRiskDollars(event.target.value)}
               />
               {riskHint && <p className="mt-1 text-[10px] text-[var(--text-3)]">{riskHint}</p>}
             </FlowField>
