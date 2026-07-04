@@ -474,6 +474,7 @@ export function TwsExecutionAssistantModule() {
   const [sweeping, setSweeping] = useState(false);
   const [form, setForm] = useState<TwsConnectRequest>(TWS_CONNECT_DEFAULTS);
   const [planForm, setPlanForm] = useState<ExecutionPlanDraftRequest>(PLAN_DEFAULTS);
+  const [standardRiskDollars, setStandardRiskDollars] = useState("");
   const [currentPlan, setCurrentPlan] = useState<ExecutionPlan | null>(null);
   const [paperPreview, setPaperPreview] = useState<PaperOrderPreview | null>(null);
   const [paperSubmission, setPaperSubmission] = useState<PaperOrderSubmission | null>(null);
@@ -1031,6 +1032,42 @@ export function TwsExecutionAssistantModule() {
     disconnectMutation.isPending;
   const standardDraftReason = saveDraftDisabledReason();
   const standardPriceFields = priceFieldsFor(planForm.order_type);
+  // Risk sizing: entryRef prefers the form's own limit price, falling back to
+  // the live quote for the charted symbol; last price via displayedQuote is
+  // already merged with the live feed above.
+  const standardEntryRef =
+    planForm.limit_price != null && planForm.limit_price > 0
+      ? planForm.limit_price
+      : (displayedQuote?.last != null && displayedQuote.last > 0 ? displayedQuote.last : null);
+  const standardStopRef =
+    standardPriceFields.includes("stop_price") && planForm.stop_price != null && planForm.stop_price > 0
+      ? planForm.stop_price
+      : null;
+  const standardRiskPerShare =
+    standardEntryRef != null && standardStopRef != null ? Math.abs(standardEntryRef - standardStopRef) : null;
+  const standardRiskSizingDisabledReason =
+    standardEntryRef == null
+      ? "Set a limit price (or wait for a quote) to size by risk"
+      : standardStopRef == null
+        ? "Risk sizing needs a stop price"
+        : null;
+  const standardRiskHint =
+    standardRiskPerShare != null && standardRiskPerShare > 0 && Number(standardRiskDollars) > 0
+      ? `risk $${Number(standardRiskDollars).toFixed(2)} / ${standardRiskPerShare.toFixed(2)} per share → ${Math.floor(Number(standardRiskDollars) / standardRiskPerShare)}`
+      : null;
+
+  function handleStandardRiskDollarsChange(value: string) {
+    setStandardRiskDollars(value);
+    const risk = Number(value);
+    if (!(risk > 0) || standardRiskPerShare == null || standardRiskPerShare === 0) return;
+    const qty = Math.max(0, Math.floor(risk / standardRiskPerShare));
+    setPlanForm((form) => ({ ...form, quantity: qty }));
+  }
+
+  function handleStandardQuantityChange(value: number) {
+    setPlanForm((form) => ({ ...form, quantity: value }));
+    setStandardRiskDollars("");
+  }
   const standardGuidance = `Plan: ${planForm.side === "BUY" ? "Buy" : "Sell"} ${quantityValue(planForm.quantity)} ${planForm.symbol || "symbol"} with ${standardEntryWording(planForm)}. Review before sending.`;
   const standardEstimatedNotional =
     planForm.limit_price != null && planForm.limit_price > 0 && planForm.quantity > 0
@@ -1799,7 +1836,7 @@ export function TwsExecutionAssistantModule() {
                           }}
                         />
                       </FlowRow>
-                      <FlowRow className="grid gap-4 md:grid-cols-2">
+                      <FlowRow className="grid gap-4 md:grid-cols-3">
                         <div id="standard-size">
                           <FlowField label="Side">
                             <FlowSegmented
@@ -1816,8 +1853,21 @@ export function TwsExecutionAssistantModule() {
                             suffix="sh"
                             value={planForm.quantity}
                             disabled={!canDraft}
-                            onChange={(event) => setPlanForm((form) => ({ ...form, quantity: Number(event.target.value) }))}
+                            onChange={(event) => handleStandardQuantityChange(Number(event.target.value))}
                           />
+                        </FlowField>
+                        <FlowField label="Risk $">
+                          <FlowValueInput
+                            type="number"
+                            step="0.01"
+                            prefix="$"
+                            placeholder="0.00"
+                            value={standardRiskDollars}
+                            disabled={!canDraft || standardRiskSizingDisabledReason != null}
+                            title={standardRiskSizingDisabledReason ?? undefined}
+                            onChange={(event) => handleStandardRiskDollarsChange(event.target.value)}
+                          />
+                          {standardRiskHint && <p className="mt-1 text-[10px] text-[var(--text-3)]">{standardRiskHint}</p>}
                         </FlowField>
                       </FlowRow>
                       <FlowRow id="standard-entry" className="space-y-4">

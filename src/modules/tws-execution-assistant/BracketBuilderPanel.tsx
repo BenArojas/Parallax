@@ -138,6 +138,7 @@ export function BracketBuilderPanel({
   const [searchResults, setSearchResults] = useState<InstrumentResult[]>([]);
   const [side, setSide] = useState<ExecutionPlanSide>("BUY");
   const [quantity, setQuantity] = useState("");
+  const [riskDollars, setRiskDollars] = useState("");
   const [orderType, setOrderType] = useState<"MKT" | "LMT">("LMT");
   const [limitPrice, setLimitPrice] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
@@ -238,6 +239,33 @@ export function BracketBuilderPanel({
 
   const req = buildRequest(conid, symbol, side, quantity, orderType, limitPrice, targetPrice, useTrail, stopPrice, trailValue);
   const guidance = bracketSentence(side, quantity, symbol, targetPrice, useTrail, stopPrice, trailValue);
+
+  // Risk sizing: bracket has no live quote prop, so entryRef is limit-price-only.
+  const riskEntryRef = Number(limitPrice) > 0 ? Number(limitPrice) : null;
+  const riskStopRef = !useTrail && Number(stopPrice) > 0 ? Number(stopPrice) : null;
+  const riskPerShare = riskEntryRef != null && riskStopRef != null ? Math.abs(riskEntryRef - riskStopRef) : null;
+  const riskSizingDisabledReason =
+    riskEntryRef == null
+      ? "Set a limit price (or wait for a quote) to size by risk"
+      : riskStopRef == null
+        ? "Risk sizing needs a stop price"
+        : null;
+  const riskHint =
+    riskPerShare != null && riskPerShare > 0 && Number(riskDollars) > 0
+      ? `risk $${Number(riskDollars).toFixed(2)} / ${riskPerShare.toFixed(2)} per share → ${Math.floor(Number(riskDollars) / riskPerShare)}`
+      : null;
+
+  function handleRiskDollarsChange(value: string) {
+    setRiskDollars(value);
+    const risk = Number(value);
+    if (!(risk > 0) || riskPerShare == null || riskPerShare === 0) return;
+    setQuantity(String(Math.max(0, Math.floor(risk / riskPerShare))));
+  }
+
+  function handleQuantityChange(value: string) {
+    setQuantity(value);
+    setRiskDollars("");
+  }
   const estimatedNotional =
     Number(quantity) > 0 && orderType === "LMT" && Number(limitPrice) > 0
       ? Number(quantity) * Number(limitPrice)
@@ -359,7 +387,7 @@ export function BracketBuilderPanel({
               onResolve={resolveInstrument}
             />
           </FlowRow>
-          <FlowRow className="grid gap-4 md:grid-cols-2">
+          <FlowRow className="grid gap-4 md:grid-cols-3">
             <div id="bracket-size">
               <FlowField label="Side">
                 <FlowSegmented
@@ -376,8 +404,21 @@ export function BracketBuilderPanel({
                 suffix="sh"
                 value={quantity}
                 disabled={!canDraft}
-                onChange={(event) => setQuantity(event.target.value)}
+                onChange={(event) => handleQuantityChange(event.target.value)}
               />
+            </FlowField>
+            <FlowField label="Risk $">
+              <FlowValueInput
+                type="number"
+                step="0.01"
+                prefix="$"
+                placeholder="0.00"
+                value={riskDollars}
+                disabled={!canDraft || riskSizingDisabledReason != null}
+                title={riskSizingDisabledReason ?? undefined}
+                onChange={(event) => handleRiskDollarsChange(event.target.value)}
+              />
+              {riskHint && <p className="mt-1 text-[10px] text-[var(--text-3)]">{riskHint}</p>}
             </FlowField>
           </FlowRow>
           <FlowRow id="bracket-entry" className="space-y-4">
