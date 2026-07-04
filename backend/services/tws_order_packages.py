@@ -462,6 +462,10 @@ def preview_order_package(req: TwsOrderPackageRequest) -> TwsOrderPackagePreview
 
 _ORDER_REF_PATTERN = re.compile(r"^ORBIT:TWS:([^:]+):([^:]+)$")
 _LOT_ROLE_PATTERN = re.compile(r"^lot(\d+)_(.+)$")
+# Orbit-tagged standalone orders that reuse the ORBIT:TWS: prefix but are not
+# packages. The flatten close order is ORBIT:TWS:FLATTEN:<conid> — a single
+# order, so the package scanner skips it instead of reading <conid> as a role.
+_STANDALONE_REF_MARKERS = frozenset({"FLATTEN"})
 _KNOWN_LOT_ROLE_SUFFIXES = frozenset({"entry", "target", "stop", "trail", "moc_fallback"})
 # Bracket legs have no lot concept (one parent, one target, one stop-or-trail child) —
 # a flat role name, not the lot{N}_<suffix> shape scale-out uses. Trailing stop, GTD,
@@ -553,6 +557,8 @@ def derive_package_warnings(
             ))
             continue
         package_id, role = parsed
+        if package_id in _STANDALONE_REF_MARKERS:
+            continue  # a standalone Orbit order (e.g. flatten close), not a package leg
         roles[order.order_id] = role
         package_ids[order.order_id] = package_id
         if not _is_known_role(role):
