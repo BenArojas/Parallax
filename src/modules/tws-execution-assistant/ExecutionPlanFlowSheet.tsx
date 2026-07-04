@@ -72,10 +72,18 @@ export function FlowRow({ children, className, id }: { children: ReactNode; clas
   );
 }
 
-export function FlowField({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+export function FlowField({ label, title, children }: { label: string; title?: string; children: ReactNode }): JSX.Element {
   return (
     <label className="block space-y-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">{label}</span>
+      <span
+        title={title}
+        className={cn(
+          "text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]",
+          title && "cursor-help decoration-dotted underline-offset-2 [text-decoration-line:underline]",
+        )}
+      >
+        {label}
+      </span>
       {children}
     </label>
   );

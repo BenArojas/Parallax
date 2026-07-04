@@ -1859,7 +1859,7 @@ export function TwsExecutionAssistantModule() {
                             onChange={(event) => handleStandardQuantityChange(Number(event.target.value))}
                           />
                         </FlowField>
-                        <FlowField label="Risk $">
+                        <FlowField label="Risk $" title="Sizes the position to lose about this much if your stop is hit.">
                           <FlowValueInput
                             type="number"
                             step="0.01"
